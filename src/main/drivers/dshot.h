@@ -137,6 +137,23 @@ void updateDshotTelemetryQuality(dshotTelemetryQuality_t *qualityStats, bool pac
 void initDshotTelemetry(const timeUs_t looptimeUs);
 void updateDshotTelemetry(void);
 
+#ifdef DSHOT_BB_PROBE
+// TEST ONLY: bidir DShot timing probe. Collected in dshot_bitbang.c, core.c and
+// scheduler.c, published once a second in debug[0..7] while debug_mode = NONE.
+typedef struct dtProbe_s {
+    timeUs_t windowStartUs;
+    uint32_t waitMaxUs;     // longest bbTelemetryWait() spin (0 with a spin fix)
+    uint32_t waitCount;     // updates that spun, or with a spin fix were deferred
+    uint32_t waitSumUs;     // total spin time
+    uint32_t gapMinUs;      // shortest send-to-send gap
+    uint32_t gapMaxUs;      // longest send-to-send gap
+    uint32_t gyroLatMaxUs;  // longest gyro EXTI -> TASK_GYRO start
+    uint32_t schedSkips;    // scheduler gross overruns (whole gyro cycles skipped)
+    uint32_t outputBusy;    // updates that found the previous output DMA still running
+} dtProbe_t;
+extern dtProbe_t dtProbe;
+#endif
+
 bool isDshotBitbangActive(const motorDevConfig_t *motorDevConfig);
 
 uint16_t getDshotErpm(uint8_t motorIndex);

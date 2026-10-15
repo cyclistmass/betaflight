@@ -154,6 +154,51 @@ static FAST_DATA_ZERO_INIT bool bbFrameDeferred;
 
 static motorProtocolTypes_e motorProtocol;
 
+#ifdef DSHOT_BB_PROBE
+#include "common/maths.h"
+#include "drivers/system.h"  // getCycleCounter(), clockCyclesToMicros()
+
+dtProbe_t dtProbe;
+
+// Called from bbUpdateComplete() at every send, task context. Tracks the
+// send-to-send gap and, once a second, publishes the window to debug[0..7]
+// when debug_mode is NONE, then starts a new window.
+static void dtProbeWindow(timeUs_t nowUs)
+{
+    if (lastSendUs != 0) {
+        const uint32_t gapUs = cmpTimeUs(nowUs, lastSendUs);
+        if (gapUs < dtProbe.gapMinUs) {
+            dtProbe.gapMinUs = gapUs;
+        }
+        if (gapUs > dtProbe.gapMaxUs) {
+            dtProbe.gapMaxUs = gapUs;
+        }
+    }
+
+    if (cmpTimeUs(nowUs, dtProbe.windowStartUs) >= 1000000) {
+        if (debugMode == DEBUG_NONE) {
+            debug[0] = MIN(dtProbe.waitMaxUs, (uint32_t)INT16_MAX);                      // max spin in bbTelemetryWait [us]
+            debug[1] = MIN(dtProbe.waitCount, (uint32_t)INT16_MAX);                      // updates that spun or were deferred
+            debug[2] = (dtProbe.gapMinUs == UINT32_MAX) ? 0 : MIN(dtProbe.gapMinUs, (uint32_t)INT16_MAX); // min send gap [us]
+            debug[3] = MIN(dtProbe.gapMaxUs, (uint32_t)INT16_MAX);                       // max send gap [us]
+            debug[4] = MIN(dtProbe.gyroLatMaxUs, (uint32_t)INT16_MAX);                   // max gyro EXTI -> TASK_GYRO [us]
+            debug[5] = MIN(dtProbe.schedSkips, (uint32_t)INT16_MAX);                     // gyro cycles skipped by the scheduler
+            debug[6] = MIN(dtProbe.outputBusy, (uint32_t)INT16_MAX);                     // updates with the output DMA still running
+            debug[7] = MIN(dtProbe.waitSumUs / 1000, (uint32_t)INT16_MAX);               // total spin [0.1% of the second]
+        }
+        dtProbe.windowStartUs = nowUs;
+        dtProbe.waitMaxUs = 0;
+        dtProbe.waitCount = 0;
+        dtProbe.waitSumUs = 0;
+        dtProbe.gapMinUs = UINT32_MAX;
+        dtProbe.gapMaxUs = 0;
+        dtProbe.gyroLatMaxUs = 0;
+        dtProbe.schedSkips = 0;
+        dtProbe.outputBusy = 0;
+    }
+}
+#endif
+
 // DMA GPIO output buffer formatting
 
 static void bbOutputDataInit(uint32_t *buffer, uint16_t portMask, bool inverted)
@@ -543,6 +588,9 @@ static bool bbTelemetryWait(void)
     bool telemetryPending;
     bool telemetryWait = false;
     const timeUs_t startTimeUs = micros();
+#ifdef DSHOT_BB_PROBE
+    const uint32_t probeStartCycles = getCycleCounter();
+#endif
 
     do {
         telemetryPending = false;
@@ -571,6 +619,17 @@ static bool bbTelemetryWait(void)
             break;
         }
     } while (telemetryPending);
+
+#ifdef DSHOT_BB_PROBE
+    if (telemetryWait) {
+        const uint32_t spinUs = clockCyclesToMicros(cmpTimeCycles(getCycleCounter(), probeStartCycles));
+        dtProbe.waitCount++;
+        dtProbe.waitSumUs += spinUs;
+        if (spinUs > dtProbe.waitMaxUs) {
+            dtProbe.waitMaxUs = spinUs;
+        }
+    }
+#endif
 
     return telemetryWait;
 }
@@ -879,6 +938,9 @@ static BB_HOT_CODE void bbUpdateComplete(void)
     // The previous frame still owns the line: nothing is sent, and the dshot
     // command sequence does not advance this update.
     if (bbFrameDeferred) {
+#ifdef DSHOT_BB_PROBE
+        dtProbe.waitCount++;
+#endif
         return;
     }
 #endif
@@ -895,6 +957,12 @@ static BB_HOT_CODE void bbUpdateComplete(void)
         bbPort_t *bbPort = &bbPorts[i];
 #ifdef USE_DSHOT_CACHE_MGMT
         SCB_CleanDCache_by_Addr(bbPort->portOutputBuffer, MOTOR_DSHOT_BUF_CACHE_ALIGN_BYTES);
+#endif
+#ifdef DSHOT_BB_PROBE
+        if (bbPort->direction == DSHOT_BITBANG_DIRECTION_OUTPUT && IS_DMA_ENABLED(bbPort->dmaResource)) {
+            // The previous frame is still being clocked out.
+            dtProbe.outputBusy++;
+        }
 #endif
 
         if (bbPort->reinitRequired) {
@@ -940,7 +1008,15 @@ static BB_HOT_CODE void bbUpdateComplete(void)
         bbDMA_Cmd(bbPort, ENABLE);
     }
 
+#ifdef DSHOT_BB_PROBE
+    {
+        const timeUs_t nowUs = micros();
+        dtProbeWindow(nowUs);
+        lastSendUs = nowUs;
+    }
+#else
     lastSendUs = micros();
+#endif
     for (int i = 0; i < usedMotorPacers; i++) {
         bbPacer_t *bbPacer = &bbPacers[i];
         bbTIM_DMACmd(bbPacer->tim, bbPacer->dmaSources, ENABLE);
@@ -1034,6 +1110,11 @@ bool dshotBitbangDevInit(motorDevice_t *device, const motorDevConfig_t *motorCon
 #endif
 
     memset(bbOutputBuffer, 0, sizeof(bbOutputBuffer));
+
+#ifdef DSHOT_BB_PROBE
+    dtProbe.gapMinUs = UINT32_MAX;
+    dtProbe.windowStartUs = micros();
+#endif
 
     for (int motorIndex = 0; motorIndex < MAX_SUPPORTED_MOTORS && motorIndex < dshotMotorCount; motorIndex++) {
         const unsigned reorderedMotorIndex = motorConfig->motorOutputReordering[motorIndex];

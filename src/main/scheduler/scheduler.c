@@ -50,6 +50,9 @@
 #include "scheduler.h"
 
 #include "sensors/gyro_init.h"
+#ifdef DSHOT_BB_PROBE
+#include "drivers/dshot.h"
+#endif
 
 // DEBUG_SCHEDULER, timings for:
 // 0 - Average time spent executing check function
@@ -567,6 +570,9 @@ FAST_CODE void scheduler(void)
         schedLoopRemainingCycles = cmpTimeCycles(nextTargetCycles, nowCycles);
 
         if (schedLoopRemainingCycles < -desiredPeriodCycles) {
+#ifdef DSHOT_BB_PROBE
+            dtProbe.schedSkips += 1 + (schedLoopRemainingCycles / -desiredPeriodCycles);
+#endif
             /* A task has so grossly overrun that at entire gyro cycle has been skipped
              * This is most likely to occur when connected to the configurator via USB as the serial
              * task is non-deterministic

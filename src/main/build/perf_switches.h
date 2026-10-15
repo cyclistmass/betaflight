@@ -54,6 +54,13 @@
 //   EXTRA_FLAGS="-DDSHOT_BB_NOSPIN_SOL"               Sol spin fix only
 //   EXTRA_FLAGS="-DPERF_LOOP -DNO_PERF_BB_ITCM"       loop fixes without the ITCM swap
 //
+// TEST ONLY: DSHOT_BB_PROBE adds a bidir DShot timing probe (not in any preset). With
+// debug_mode = NONE it publishes once a second: debug[0] longest spin [us], debug[1] updates
+// that spun (or, with a spin fix, were deferred), debug[2]/[3] shortest/longest send gap [us],
+// debug[4] longest gyro interrupt -> gyro task delay [us], debug[5] gyro cycles skipped by the
+// scheduler, debug[6] frames started while the previous one was still being sent,
+// debug[7] total spin [0.1% of the second].
+//
 // TEST ONLY: on F722, #15779 still forces DShot300 and PID <= 4 kHz with bidir on.
 // Add -DTEST_UNGATE_PID_DENOM_CHECK to lift that for a bench test. Never release.
 
