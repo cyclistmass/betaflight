@@ -1,0 +1,120 @@
+# TEST ONLY: build the five F722 perf test variants for every STM32F722 and STM32F745 board config.
+# Runs on push to branch f7-test-builds. Builds the code at FW_REF, not the branch tip, so every
+# hex carries the same revision as the test release. Output: one artifact per variant, each with
+# the hex files, SHA256SUMS.txt and FAILED.txt. Nothing is uploaded to a release by this workflow.
+
+name: F7 test builds
+
+on:
+  push:
+    branches: [f7-test-builds]
+
+env:
+  FW_REF: 900f67102ccb0ae755455094e49dcad1d7e36a29
+  GATES: -DTEST_UNGATE_PID_DENOM_CHECK -DDSHOT_BB_PROBE
+  SHARDS: 20
+
+permissions:
+  contents: read
+
+jobs:
+  list:
+    runs-on: ubuntu-latest
+    outputs:
+      shards: ${{ steps.list.outputs.shards }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ env.FW_REF }}
+      - run: git submodule update --init -- src/config
+      - run: make configs
+      - id: list
+        run: |
+          grep -l -E '^#define[[:space:]]+FC_TARGET_MCU[[:space:]]+STM32F7(22|45)[[:space:]]*$' src/config/configs/*/*/config.h \
+            | xargs -n1 dirname | xargs -n1 basename | sort -u > boards.txt
+          echo "boards: $(wc -l < boards.txt)"
+          echo "shards=$(seq 0 $((SHARDS - 1)) | jq -R . | jq -s -c .)" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v6
+        with:
+          name: boards
+          path: boards.txt
+
+  build:
+    needs: list
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ${{ fromJson(needs.list.outputs.shards) }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ env.FW_REF }}
+      - run: git submodule update --init -- src/config
+      - uses: actions/cache@v5
+        with:
+          path: tools
+          key: f7-test-tools-${{ hashFiles('mk/tools.mk') }}
+      - run: make SDK=arm platform-tools-install
+      - run: make configs
+      - uses: actions/download-artifact@v5
+        with:
+          name: boards
+      - name: Build five variants per board
+        run: |
+          REV=$(git rev-parse --short=9 HEAD)
+          mkdir -p out
+          # Generic MCU targets first (shard 0), then this shard's slice of the board list.
+          if [ "${{ matrix.shard }}" = 0 ]; then printf 'STM32F722\nSTM32F745\n' > mine.txt; else : > mine.txt; fi
+          awk -v s=${{ matrix.shard }} -v n=$SHARDS '(NR - 1) % n == s' boards.txt >> mine.txt
+          variant() {
+            case $1 in
+              1-base)      echo "" ;;
+              2-loop)      echo "-DPERF_LOOP" ;;
+              3-all-opus)  echo "-DPERF_ALL -DDSHOT_BB_NOSPIN_OPUS" ;;
+              4-all-sol)   echo "-DPERF_ALL -DDSHOT_BB_NOSPIN_SOL" ;;
+              5-all-fable) echo "-DPERF_ALL -DDSHOT_BB_NOSPIN_FABLE" ;;
+            esac
+          }
+          while read -r b; do
+            case $b in STM32F7*) arg="$b" ;; *) arg="CONFIG=$b" ;; esac
+            for v in 1-base 2-loop 3-all-opus 4-all-sol 5-all-fable; do
+              rm -rf obj
+              mkdir -p out/$v
+              if make -j"$(nproc)" $arg EXTRA_FLAGS="-Werror $GATES $(variant $v)" > build.log 2>&1; then
+                cp obj/betaflight_*.hex "out/$v/betaflight_${b}_${REV}_${v}.hex"
+                echo "OK   $b $v"
+              else
+                echo "$b $v: $(grep -m1 -E 'error|Error' build.log)" >> "out/$v/FAILED.txt"
+                echo "FAIL $b $v"
+              fi
+            done
+          done < mine.txt
+      - uses: actions/upload-artifact@v6
+        with:
+          name: shard-${{ matrix.shard }}
+          path: out
+          retention-days: 14
+
+  package:
+    needs: build
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v5
+        with:
+          pattern: shard-*
+          path: shards
+      - run: |
+          for v in 1-base 2-loop 3-all-opus 4-all-sol 5-all-fable; do
+            mkdir -p "pkg/$v"
+            cp shards/*/$v/*.hex "pkg/$v/" 2>/dev/null || true
+            cat shards/*/$v/FAILED.txt 2>/dev/null | sort > "pkg/$v/FAILED.txt" || true
+            (cd "pkg/$v" && sha256sum *.hex > SHA256SUMS.txt)
+            echo "$v: $(ls pkg/$v/*.hex | wc -l) hex, $(wc -l < pkg/$v/FAILED.txt) failed"
+          done
+      - uses: actions/upload-artifact@v6
+        with:
+          name: f7-test-builds
+          path: pkg
+          retention-days: 14
