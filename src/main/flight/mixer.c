@@ -132,8 +132,8 @@ static void calculateThrottleAndCurrentMotorEndpoints(timeUs_t currentTimeUs)
     static bool itermHoldActive = false; // set on reversal, so reversalTimeUs is only compared while fresh
     static float motorRangeMinIncrease = 0;
 
-    float currentThrottleInputRange = 0;
     if (mixerRuntime.feature3dEnabled) {
+        float currentThrottleInputRange = 0;
         float rcCommand3dDeadBandLow;
         float rcCommand3dDeadBandHigh;
         const float midThrottle = rcUsToThrottle(rxConfig()->midrc);
@@ -235,9 +235,12 @@ static void calculateThrottleAndCurrentMotorEndpoints(timeUs_t currentTimeUs)
                 itermHoldActive = false;
             }
         }
+
+        // scale the throttle from the active 3D band to 0..1; outside 3D mode the
+        // stick already spans the full range so there is nothing to divide by
+        throttle /= currentThrottleInputRange;
     } else {
         throttle = rcCommand[THROTTLE] + rcUsSpanToThrottle(throttleAngleCorrection);
-        currentThrottleInputRange = 1.0f;
 #ifdef USE_DYN_IDLE
         if (mixerRuntime.dynIdleMinRps > 0.0f) {
             const float maxIncrease = wasThrottleRaised()
@@ -283,7 +286,7 @@ static void calculateThrottleAndCurrentMotorEndpoints(timeUs_t currentTimeUs)
         motorOutputMixSign = 1;
     }
 
-    throttle = constrainf(throttle / currentThrottleInputRange, 0.0f, 1.0f);
+    throttle = constrainf(throttle, 0.0f, 1.0f);
     rcThrottle = throttle;
 }
 
@@ -466,6 +469,8 @@ float getMotorOutputRms(void)
 
 static void applyMixToMotors(const float motorMix[MAX_SUPPORTED_MOTORS], motorMixer_t *activeMixer)
 {
+    const bool failsafeActive = failsafeIsActive(); // loop invariant, read once rather than once per motor
+
     // Now add in the desired throttle, but keep in a range that doesn't clip adjusted
     // roll/pitch/yaw. This could move throttle down, but also up for those low throttle flips.
     for (int i = 0; i < mixerRuntime.motorCount; i++) {
@@ -480,7 +485,7 @@ static void applyMixToMotors(const float motorMix[MAX_SUPPORTED_MOTORS], motorMi
             motorOutput += mixerTricopterMotorCorrection(i);
         }
 #endif
-        if (failsafeIsActive()) {
+        if (failsafeActive) {
 #ifdef USE_DSHOT
             if (isMotorProtocolDshot()) {
                 motorOutput = (motorOutput < motorRangeMin) ? mixerRuntime.disarmMotorOutput : motorOutput; // Prevent getting into special reserved range

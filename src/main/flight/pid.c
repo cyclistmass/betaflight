@@ -530,11 +530,14 @@ void pidAcroTrainerInit(void)
 // steepening near the top of the throttle range.
 //
 // Cost: 4 mults, 2 adds, 2 subs per motor (no sqrt). Called per-motor per loop.
+// With e = 0 the curve is the identity, so the arithmetic is skipped.
 float pidApplyThrustLinearization(float motorOutput)
 {
     const float e = pidRuntime.thrustLinearization;
-    const float inv = 1.0f - motorOutput;
-    motorOutput *= 1.0f + e * inv * (1.0f + e * (inv - motorOutput));
+    if (e != 0.0f) {
+        const float inv = 1.0f - motorOutput;
+        motorOutput *= 1.0f + e * inv * (1.0f + e * (inv - motorOutput));
+    }
     return motorOutput;
 }
 
