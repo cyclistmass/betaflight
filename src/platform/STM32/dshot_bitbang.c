@@ -310,7 +310,7 @@ static void bbSetupDma(bbPort_t *bbPort)
     bbDMA_ITConfig(bbPort);
 }
 
-FAST_IRQ_HANDLER void bbDMAIrqHandler(dmaChannelDescriptor_t *descriptor)
+FAST_CODE void bbDMAIrqHandler(dmaChannelDescriptor_t *descriptor)
 {
     dbgPinHi(0);
 
@@ -555,14 +555,14 @@ static bool bbTelemetryWait(void)
     return telemetryWait;
 }
 
-static void bbUpdateInit(void)
+static FAST_CODE void bbUpdateInit(void)
 {
     for (int i = 0; i < usedMotorPorts; i++) {
         bbOutputDataClear(bbPorts[i].portOutputBuffer);
     }
 }
 
-static bool bbDecodeTelemetry(void)
+static FAST_CODE bool bbDecodeTelemetry(void)
 {
 #ifdef USE_DSHOT_TELEMETRY
     if (useDshotTelemetry) {
@@ -627,7 +627,7 @@ static bool bbDecodeTelemetry(void)
     return true;
 }
 
-static void bbWriteInt(uint8_t motorIndex, uint16_t value)
+static FAST_CODE void bbWriteInt(uint8_t motorIndex, uint16_t value)
 {
     bbMotor_t *const bbmotor = &bbMotors[motorIndex];
 
@@ -659,12 +659,12 @@ static void bbWriteInt(uint8_t motorIndex, uint16_t value)
     }
 }
 
-static void bbWrite(uint8_t motorIndex, float value)
+static FAST_CODE void bbWrite(uint8_t motorIndex, float value)
 {
     bbWriteInt(motorIndex, lrintf(value));
 }
 
-static void bbUpdateComplete(void)
+static FAST_CODE void bbUpdateComplete(void)
 {
     // If there is a dshot command loaded up, time it correctly with motor update
 
