@@ -1,3 +1,11 @@
+> **Test branch `f722-bidir-switchable`: 8 kHz PID with bidir DShot600 on F722.**
+> Agent-built and agent-checked. Not reviewed by a person. Never flown. Bench use only, props off.
+>
+> - Where the performance was found: [F722-PERF-FINDINGS.md](F722-PERF-FINDINGS.md)
+> - How to test: [F722-PERF-TESTING.md](F722-PERF-TESTING.md)
+> - Build switches: [src/main/build/perf_switches.h](src/main/build/perf_switches.h)
+> - Test firmware: [f722-test-900f67102](https://github.com/cyclistmass/betaflight/releases/tag/f722-test-900f67102)
+
 ![Betaflight](https://raw.githubusercontent.com/betaflight/.github/main/profile/images/bf_logo.svg#gh-light-mode-only)
 ![Betaflight](https://raw.githubusercontent.com/betaflight/.github/main/profile/images/bf_logo_dark.svg#gh-dark-mode-only)
 
