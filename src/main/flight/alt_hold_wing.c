@@ -36,7 +36,6 @@
 #include "flight/failsafe.h"
 #include "flight/landing_wing.h"
 #include "flight/position.h"
-#include "flight/position_estimator.h"
 #include "flight/position_nav.h"
 
 #include "rx/rx.h"
@@ -45,9 +44,6 @@
 
 #include "alt_hold.h"
 
-// Event driven off positionEstimatorUpdate(); without the estimator the task falls back to
-// periodic scheduling so that mode entry and exit are still serviced.
-#define ALTHOLD_FALLBACK_PERIOD_US (2 * TASK_PERIOD_HZ(ALTHOLD_TASK_RATE_HZ))
 #define ALTHOLD_TARGET_LEAD_S       1.0f
 
 typedef struct {
@@ -194,17 +190,6 @@ float altHoldGetTargetAltitudeCm(void)
     return altHold.targetAltitudeCm;
 }
 #endif
-
-bool altHoldUpdateCheck(timeUs_t currentTimeUs, timeDelta_t currentDeltaTimeUs)
-{
-    UNUSED(currentTimeUs);
-
-    if (positionEstimatorTakeUpdate(POS_EST_CONSUMER_ALTHOLD)) {
-        return true;
-    }
-
-    return currentDeltaTimeUs >= ALTHOLD_FALLBACK_PERIOD_US;
-}
 
 void updateAltHold(timeUs_t currentTimeUs)
 {

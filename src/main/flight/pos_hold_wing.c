@@ -30,31 +30,15 @@
 #include "flight/gps_rescue.h"
 #include "flight/landing_wing.h"
 #include "flight/position_estimator.h"
-#include "scheduler/scheduler.h"
 
 #include "pg/pos_hold.h"
 #include "pos_hold.h"
-
-// Event driven off positionEstimatorUpdate(); without the estimator the task falls back to
-// periodic scheduling so that mode entry and exit are still serviced.
-#define POSHOLD_FALLBACK_PERIOD_US (2 * TASK_PERIOD_HZ(POSHOLD_TASK_RATE_HZ))
 
 static bool isEnabled;
 
 void posHoldInit(void)
 {
     isEnabled = false;
-}
-
-bool posHoldUpdateCheck(timeUs_t currentTimeUs, timeDelta_t currentDeltaTimeUs)
-{
-    UNUSED(currentTimeUs);
-
-    if (positionEstimatorTakeUpdate(POS_EST_CONSUMER_POSHOLD)) {
-        return true;
-    }
-
-    return currentDeltaTimeUs >= POSHOLD_FALLBACK_PERIOD_US;
 }
 
 // The aircraft loiters about where position hold engaged. The roll stick takes over the steering,

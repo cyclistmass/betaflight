@@ -65,7 +65,6 @@ extern "C" {
     }
     void positionEstimatorEnableXY(bool enable) { UNUSED(enable); }
     bool positionEstimatorIsValidXY(void) { return testEstimate.isValidXY; }
-    bool positionEstimatorTakeUpdate(positionEstimatorConsumer_e) { return false; }
     static bool mockHeadingRequired = false;
     bool positionEstimatorIsHeadingRequired(void) { return mockHeadingRequired; }
 

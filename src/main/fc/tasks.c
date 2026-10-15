@@ -312,6 +312,14 @@ static void taskPositionUpdate(timeUs_t currentTimeUs)
 {
     UNUSED(currentTimeUs);
     positionUpdate();
+
+    // A new estimate exists: run its consumers now rather than up to a task period later.
+#ifdef USE_ALTITUDE_HOLD
+    schedulerSignalTask(TASK_ALTHOLD);
+#endif
+#ifdef USE_POSITION_HOLD
+    schedulerSignalTask(TASK_POSHOLD);
+#endif
 }
 #endif // USE_BARO || USE_GPS || USE_RANGEFINDER || USE_OPTICALFLOW
 
@@ -373,6 +381,13 @@ static void taskCameraControl(timeUs_t currentTimeUs)
     .staticPriority = staticPriorityParam \
 }
 
+// ALTHOLD and POSHOLD are signalled by TASK_POSITION (see taskPositionUpdate), so they run
+// as soon as a new estimate exists rather than at an arbitrary phase relative to it. Their
+// desired period only matters when the estimator is not running at all: it is the interval
+// at which they then still run, so that mode entry and exit are serviced. Twice the nominal
+// period, so that it never fires ahead of a signal from a merely late estimator.
+#define HOLD_TASK_FALLBACK_PERIOD_US(rateHz) (2 * TASK_PERIOD_HZ(rateHz))
+
 // Task info in .bss (unitialised data)
 task_t tasks[TASK_COUNT];
 
@@ -419,11 +434,11 @@ task_attribute_t task_attributes[TASK_COUNT] = {
 #endif
 
 #ifdef USE_ALTITUDE_HOLD
-    [TASK_ALTHOLD] = DEFINE_TASK("ALTHOLD", NULL, altHoldUpdateCheck, updateAltHold, TASK_PERIOD_HZ(ALTHOLD_TASK_RATE_HZ), TASK_PRIORITY_LOW), // Event driven by the position estimator, falls back to periodic scheduling
+    [TASK_ALTHOLD] = DEFINE_TASK("ALTHOLD", NULL, NULL, updateAltHold, HOLD_TASK_FALLBACK_PERIOD_US(ALTHOLD_TASK_RATE_HZ), TASK_PRIORITY_LOW), // Signalled by TASK_POSITION, falls back to periodic scheduling
 #endif
 
 #ifdef USE_POSITION_HOLD
-    [TASK_POSHOLD] = DEFINE_TASK("POSHOLD", NULL, posHoldUpdateCheck, updatePosHold, TASK_PERIOD_HZ(POSHOLD_TASK_RATE_HZ), TASK_PRIORITY_LOW), // Event driven by the position estimator, falls back to periodic scheduling
+    [TASK_POSHOLD] = DEFINE_TASK("POSHOLD", NULL, NULL, updatePosHold, HOLD_TASK_FALLBACK_PERIOD_US(POSHOLD_TASK_RATE_HZ), TASK_PRIORITY_LOW), // Signalled by TASK_POSITION, falls back to periodic scheduling
 #endif
 
 #ifdef USE_MAG

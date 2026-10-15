@@ -96,7 +96,6 @@ extern "C" {
     float getRcDeflection(int axis) { return axis == FD_PITCH ? testPitchDeflection : testRollDeflection; }
     float getRcDeflectionAbs(int axis) { return fabsf(getRcDeflection(axis)); }
     bool failsafeIsActive(void) { return testFailsafe; }
-    bool positionEstimatorTakeUpdate(positionEstimatorConsumer_e) { return true; }
     const positionEstimate3d_t *positionEstimatorGetEstimate(void) { return &testEstimate; }
     bool positionEstimatorIsValidXY(void) { return testEstimate.isValidXY; }
     void positionNavUpdate(float, const positionEstimate3d_t *) { testNavUpdates++; }

@@ -295,6 +295,24 @@ void setTaskEnabled(taskId_e taskId, bool enabled)
     }
 }
 
+// Signal a time-driven task to run at its next scheduling opportunity, as though it had
+// just aged a period. For a task that consumes what another task produces, so that the
+// consumer runs as soon as the data exists rather than at an arbitrary phase relative to
+// it, and costs the scheduler nothing in between. The consumer keeps its desiredPeriodUs
+// as a fallback for when the producer is not running. A task with a checkFunc signals
+// itself from there instead. Harmless for a task that is not enabled.
+void schedulerSignalTask(taskId_e taskId)
+{
+    if (taskId < TASK_COUNT) {
+        task_t *task = getTask(taskId);
+        const uint16_t signalledPriority = 1 + task->attribute->staticPriority;
+        // never demote a task that has already aged past this
+        if (task->dynamicPriority < signalledPriority) {
+            task->dynamicPriority = signalledPriority;
+        }
+    }
+}
+
 timeDelta_t getTaskDeltaTimeUs(taskId_e taskId)
 {
     if (taskId == TASK_SELF) {

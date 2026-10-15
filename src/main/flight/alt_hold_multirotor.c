@@ -33,7 +33,6 @@
 #include "flight/autopilot.h"
 #include "flight/failsafe.h"
 #include "flight/position.h"
-#include "flight/position_estimator.h"
 #include "flight/position_nav.h"
 
 #include "rx/rx.h"
@@ -41,13 +40,6 @@
 #include "scheduler/scheduler.h"
 
 #include "alt_hold.h"
-
-// TASK_ALTHOLD is event driven off positionEstimatorUpdate(), so it runs as soon
-// as a new altitude estimate exists rather than at an arbitrary phase relative to
-// it. If the estimator is not running at all (TASK_POSITION disabled) this is the
-// interval after which the task falls back to periodic scheduling, so that mode
-// entry and exit are still serviced.
-#define ALTHOLD_FALLBACK_PERIOD_US (2 * TASK_PERIOD_HZ(ALTHOLD_TASK_RATE_HZ))
 
 typedef struct {
     bool isActive;
@@ -195,18 +187,6 @@ static void altHoldUpdate(timeUs_t taskIntervalUs)
     altitudeControl(targetAltitudeCm, taskIntervalUs, targetAltitudeVelocity, velLimitCmS);
 }
 
-bool altHoldUpdateCheck(timeUs_t currentTimeUs, timeDelta_t currentDeltaTimeUs)
-{
-    UNUSED(currentTimeUs);
-
-    if (positionEstimatorTakeUpdate(POS_EST_CONSUMER_ALTHOLD)) {
-        return true;
-    }
-
-    // No estimator running, so fall back to periodic scheduling
-    return currentDeltaTimeUs >= ALTHOLD_FALLBACK_PERIOD_US;
-}
-
 void updateAltHold(timeUs_t currentTimeUs) {
     UNUSED(currentTimeUs);
 
@@ -214,7 +194,7 @@ void updateAltHold(timeUs_t currentTimeUs) {
     altHoldProcessTransitions();
 
     if (altHold.isActive) {
-        // Event driven, so the interval between runs is the estimator's, not the nominal task period
+        // Signalled by the estimator, so the interval between runs is its, not the nominal task period
         altHoldUpdate(autopilotTaskIntervalUs(TASK_PERIOD_HZ(ALTHOLD_TASK_RATE_HZ)));
     }
 }

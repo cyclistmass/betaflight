@@ -68,7 +68,6 @@ extern "C" {
     extern float testAltitudeAccelerationCmS;
     extern float testCosTiltAngle;
     extern throttleStatus_e testThrottleStatus;
-    extern bool testEstimatorUpdatePending;
     extern timeDelta_t testTaskDeltaTimeUs;
     extern bool testNavActive;
     extern bool testNavReached;
@@ -99,7 +98,6 @@ protected:
         testAltitudeAccelerationCmS = 0.0f;
         testCosTiltAngle = 1.0f;
         testThrottleStatus = THROTTLE_LOW;
-        testEstimatorUpdatePending = false;
         testTaskDeltaTimeUs = TASK_PERIOD_HZ(ALTHOLD_TASK_RATE_HZ);
         testNavActive = false;
         testNavReached = false;
@@ -254,24 +252,7 @@ TEST_F(AltholdControlUnittest, AltitudeControlCompensatesForTilt)
     EXPECT_GT(tiltedThrottle, levelThrottle);
 }
 
-// TASK_ALTHOLD is event driven off positionEstimatorUpdate() rather than run on a
-// fixed period, so it starts as soon as a new altitude estimate exists.
-TEST_F(AltholdControlUnittest, AltHoldIsScheduledByEstimatorUpdates)
-{
-    // Nothing published and no time elapsed: nothing to do
-    EXPECT_FALSE(altHoldUpdateCheck(currentTimeUs, 0));
-
-    // A new estimate schedules the task, and only once
-    testEstimatorUpdatePending = true;
-    EXPECT_TRUE(altHoldUpdateCheck(currentTimeUs, 0));
-    EXPECT_FALSE(altHoldUpdateCheck(currentTimeUs, 0));
-
-    // With no estimator running, periodic scheduling still services transitions
-    EXPECT_FALSE(altHoldUpdateCheck(currentTimeUs, TASK_PERIOD_HZ(ALTHOLD_TASK_RATE_HZ)));
-    EXPECT_TRUE(altHoldUpdateCheck(currentTimeUs, 2 * TASK_PERIOD_HZ(ALTHOLD_TASK_RATE_HZ)));
-}
-
-// Event driven scheduling makes the task interval the estimator's, so dt has to
+// Scheduling off the estimator makes the task interval the estimator's, so dt has to
 // be measured. It is bounded, so a first run or a starved one cannot hand the
 // integrators an arbitrarily large step.
 TEST_F(AltholdControlUnittest, TaskIntervalIsMeasuredAndBounded)
@@ -390,14 +371,6 @@ extern "C" {
     const positionEstimate3d_t *positionEstimatorGetEstimate(void) { return &stubEstimate; }
     void positionEstimatorEnableXY(bool /*enable*/) { }
     bool positionEstimatorIsValidXY(void) { return false; }
-
-    bool testEstimatorUpdatePending = false;
-    bool positionEstimatorTakeUpdate(positionEstimatorConsumer_e /*consumer*/)
-    {
-        const bool pending = testEstimatorUpdatePending;
-        testEstimatorUpdatePending = false;
-        return pending;
-    }
 
     void positionNavInit(void) { }
     void positionNavReset(void) { }

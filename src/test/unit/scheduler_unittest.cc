@@ -467,6 +467,42 @@ TEST(SchedulerUnittest, TestPriorityBump)
     EXPECT_EQ(11000 + TEST_UPDATE_ACCEL_TIME, simulatedTime);
 }
 
+TEST(SchedulerUnittest, TestSignalTask)
+{
+    // disable all tasks except TASK_ATTITUDE, which is time driven with a 10000us period
+    for (int taskId = 0; taskId < TASK_COUNT; ++taskId) {
+        setTaskEnabled(static_cast<taskId_e>(taskId), false);
+    }
+    setTaskEnabled(TASK_ATTITUDE, true);
+
+    simulatedTime = 4000;
+    tasks[TASK_ATTITUDE].lastExecutedAtUs = simulatedTime;
+    tasks[TASK_ATTITUDE].dynamicPriority = 0;
+    scheduler();
+    // not due, so it does not run
+    EXPECT_EQ(static_cast<task_t*>(0), unittest_scheduler_selectedTask);
+
+    // a signal runs it at the next opportunity, ahead of its period
+    schedulerSignalTask(TASK_ATTITUDE);
+    EXPECT_EQ(1 + TASK_PRIORITY_MEDIUM, tasks[TASK_ATTITUDE].dynamicPriority);
+    scheduler();
+    EXPECT_EQ(&tasks[TASK_ATTITUDE], unittest_scheduler_selectedTask);
+    EXPECT_EQ(0, tasks[TASK_ATTITUDE].dynamicPriority);
+
+    // running consumed the signal: nothing runs until the next signal or the period
+    scheduler();
+    EXPECT_EQ(static_cast<task_t*>(0), unittest_scheduler_selectedTask);
+
+    // a signal never demotes a task that has already aged past it
+    tasks[TASK_ATTITUDE].dynamicPriority = 1 + 3 * TASK_PRIORITY_MEDIUM;
+    schedulerSignalTask(TASK_ATTITUDE);
+    EXPECT_EQ(1 + 3 * TASK_PRIORITY_MEDIUM, tasks[TASK_ATTITUDE].dynamicPriority);
+    tasks[TASK_ATTITUDE].dynamicPriority = 0;
+
+    // an invalid id is ignored
+    schedulerSignalTask(TASK_NONE);
+}
+
 TEST(SchedulerUnittest, TestGyroTask)
 {
     static const uint32_t startTime = 4000;
