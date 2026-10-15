@@ -117,6 +117,10 @@
 #include "sensors/gyro.h"
 #ifdef DSHOT_BB_PROBE
 #include "sensors/gyro_init.h"
+
+// TEST ONLY: filled here, in scheduler.c and in the STM32 bitbang driver, which
+// publishes it. Defined here so that the probe links on every platform.
+dtProbe_t dtProbe;
 #endif
 
 #include "telemetry/telemetry.h"

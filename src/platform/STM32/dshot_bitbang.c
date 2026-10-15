@@ -158,8 +158,6 @@ static motorProtocolTypes_e motorProtocol;
 #include "common/maths.h"
 #include "drivers/system.h"  // getCycleCounter(), clockCyclesToMicros()
 
-dtProbe_t dtProbe;
-
 // Called from bbUpdateComplete() at every send, task context. Tracks the
 // send-to-send gap and, once a second, publishes the window to debug[0..7]
 // when debug_mode is NONE, then starts a new window.
