@@ -1,6 +1,11 @@
 > **Test branch `f722-bidir-switchable`: 8 kHz PID with bidir DShot600 on F722.**
 > Agent-built and agent-checked. Not reviewed by a person. Never flown. Bench use only, props off.
 >
+> **The problem it targets ("the spin"):** with bidir DShot, each motor pin sends a frame and then listens
+> 62 us for the ESC's RPM reply. If the next motor update comes while the pin still listens, master makes the
+> CPU wait in a busy loop until the reply ends: up to 62 us of a 125 us loop at 8 kHz. The spin fixes skip that
+> one motor update instead, so the ESC keeps its last throttle for one more loop.
+>
 > - Where the performance was found: [F722-PERF-FINDINGS.md](F722-PERF-FINDINGS.md)
 > - How to test: [F722-PERF-TESTING.md](F722-PERF-TESTING.md)
 > - Build switches: [src/main/build/perf_switches.h](src/main/build/perf_switches.h)

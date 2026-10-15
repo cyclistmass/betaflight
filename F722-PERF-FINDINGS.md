@@ -7,6 +7,15 @@ was measured, what was changed, and the "don't spin" fix that targets the cause.
 [F722-PERF-TESTING.md](F722-PERF-TESTING.md). Prebuilt test firmware:
 [f722-test-900f67102](https://github.com/cyclistmass/betaflight/releases/tag/f722-test-900f67102).
 
+**What "the spin" means.** With bidirectional DShot, each motor pin does two jobs every loop. It sends the
+motor frame (28 us), then listens for the ESC's RPM reply (62 us). If the next motor update arrives while the
+pin is still listening, today's code makes the CPU wait in a busy loop ("spin") until the listen window closes.
+At 8 kHz a loop is 125 us, so one late loop can lose up to 62 us to this wait and miss the next gyro sample.
+The "spin fixes" skip that one motor update instead of waiting. The ESC keeps its last throttle for one more
+loop, and the CPU goes on at once.
+
+![Bidir DShot timing at 8 kHz: on time, late loop today, late loop with a spin fix](docs/f722/spin-timing.svg)
+
 Grades used below: **MEASURED** = ran on the board or in the simulator. **READ** = from source, with file:line.
 **HYPOTHESIS** = everything else.
 
@@ -128,14 +137,7 @@ then 62.2 us listening for the ESC's RPM reply (140 samples at 2.25 MHz). The li
 aborting it drove the line against a transmitting ESC and corrupted the barometer (#15533).
 READ `src/platform/STM32/dshot_bitbang.c`
 
-```
-           0        28.3                   90.5             125 us
-On time    [ send  ][ listen 62 ...........]   line free    | next frame, no wait
-Late today [ send  ][ listen ..............]
-                         ^ next write at 40 us: CPU spins in flash until 90.5
-With fix   [ send  ][ listen ..............]
-                         ^ next write at 40 us: frame deferred, CPU returns at once
-```
+The diagram at the top of this file shows the timing.
 
 At a steady 8 kHz the line is free 34.5 us before the next frame, so nothing waits. If a loop runs late, the
 next write lands while the line is still busy. Today `bbTelemetryWait` spins in flash until the reply ends: up
@@ -172,6 +174,19 @@ All three change only `src/platform/STM32/dshot_bitbang.c`. No unit test covers 
 - If loops stay closer than 90.5 us for a long stretch, the motor update rate halves. The probe counts deferred
   frames so this can be seen.
 - Other platforms (APM32, AT32, GD32, X32) keep the spin.
+
+## How each number was measured
+
+| Number | Method |
+|---|---|
+| Stage cycles (PID loop, motor update, decode, filters) | A TEST ONLY build reads the CPU cycle counter before and after each stage, averages 1,024 calls, and puts the result in `debug[]`. A script reads it over MSP with `debug_mode = NONE`. Each build is flashed by DFU with a full erase. Rounds are interleaved (base, patched, base, ...) so drift hits both equally. 216 MHz converts cycles to us. |
+| Scheduler pass cost (A2) | Same method around the task-priority loop in `scheduler()`, plus a count of scheduler passes per 100 ms. 3 rounds x 1,500 samples. |
+| Same output as master | Disassembly of the whole firmware with the revision string pinned, compared line by line. 0 differing lines means the same machine code. A2's priority result was also compared with master on 1.3 billion host cases. |
+| Flight behaviour | SimITL runs the real firmware as SITL against a simulated quad and a scripted flight. Traces, CLI output and blackbox must be byte-identical to master. Deliberate small breaks must change them, which proves the test can see a change. |
+| Decoder correctness (D) | New and old decoder decode the same input: a 2,209-frame corpus and 20 million random buffers, 0 mismatches. |
+| The spin and the 62 us window | Read from the driver: 51 output states at 1.8 MHz and 140 input samples at 2.25 MHz. Not yet measured at 8 kHz. The `DSHOT_BB_PROBE` build measures it on a board. |
+
+Bench scripts and raw results: branch `f722-bidir-bench`, folder `bench/f722`.
 
 ## Build switches: what each one buys
 

@@ -1,6 +1,12 @@
 # Testing the F722 bidir DShot600 switches
 
 This branch puts each F722 performance patch and three fixes for the DShot spin behind build switches.
+
+**The spin:** with bidir DShot, each motor pin sends a frame (28 us) and then listens for the ESC's RPM reply
+(62 us). If the next motor update comes while the pin still listens, the CPU waits in a busy loop until the
+reply window closes. At 8 kHz (125 us per loop) that can cost up to 62 us. A spin fix skips that one motor
+update instead, and the ESC keeps its last throttle for one more loop. Details: `F722-PERF-FINDINGS.md`.
+
 With no switches the build is master. All switches and presets are listed in
 `src/main/build/perf_switches.h`.
 
@@ -13,11 +19,11 @@ DShot600 and an 8 kHz PID loop stay on with bidir. It is TEST ONLY. Never releas
 
 | Build | EXTRA_FLAGS (plus the TEST flag) | What it shows |
 |---|---|---|
-| Base | (none) | Master with the spin, the reference |
-| Loop fixes | `-DPERF_LOOP` | Faster PID loop, spin kept |
-| All, Opus fix | `-DPERF_ALL -DDSHOT_BB_NOSPIN_OPUS` | Loop fixes and the Opus spin fix |
-| All, Sol fix | `-DPERF_ALL -DDSHOT_BB_NOSPIN_SOL` | Loop fixes and the Sol spin fix |
-| All, Fable fix | `-DPERF_ALL -DDSHOT_BB_NOSPIN_FABLE` | Loop fixes and the Fable spin fix |
+| Base | (none) | Master, unchanged. The CPU still waits on a busy motor pin. The reference |
+| Loop fixes | `-DPERF_LOOP` | Patches that make the PID loop faster. The CPU still waits on a busy motor pin |
+| All, Opus fix | `-DPERF_ALL -DDSHOT_BB_NOSPIN_OPUS` | Faster loop, plus the Opus fix: skip the motor update instead of waiting |
+| All, Sol fix | `-DPERF_ALL -DDSHOT_BB_NOSPIN_SOL` | Faster loop, plus the Sol fix: skip the motor update instead of waiting |
+| All, Fable fix | `-DPERF_ALL -DDSHOT_BB_NOSPIN_FABLE` | Faster loop, plus the Fable fix: skip the motor update instead of waiting |
 
 Example: `make CONFIG=GEPRCF722_BT_HD_V3 EXTRA_FLAGS="-DTEST_UNGATE_PID_DENOM_CHECK -DPERF_ALL -DDSHOT_BB_NOSPIN_FABLE"`
 
