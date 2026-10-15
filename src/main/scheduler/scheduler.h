@@ -262,6 +262,9 @@ void getCheckFuncInfo(cfCheckFuncInfo_t *checkFuncInfo);
 void getTaskInfo(taskId_e taskId, taskInfo_t *taskInfo);
 void rescheduleTask(taskId_e taskId, timeDelta_t newPeriodUs);
 void setTaskEnabled(taskId_e taskId, bool newEnabledState);
+#ifdef PERF_HOLD_TASK_SIGNAL
+void schedulerSignalTask(taskId_e taskId);
+#endif
 timeDelta_t getTaskDeltaTimeUs(taskId_e taskId);
 void schedulerIgnoreTaskStateTime(void);
 void schedulerIgnoreTaskExecRate(void);

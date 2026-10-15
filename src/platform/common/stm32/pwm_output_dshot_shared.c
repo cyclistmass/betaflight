@@ -109,7 +109,11 @@ uint8_t getTimerIndex(void *timer)
  * @param index index of the motor that the data is to be sent to
  * @param value the dshot value to be sent
 */
+#ifdef PERF_BB_ITCM
+FAST_CODE_PREF void pwmWriteDshotInt(uint8_t index, uint16_t value)
+#else
 FAST_CODE void pwmWriteDshotInt(uint8_t index, uint16_t value)
+#endif
 {
     motorDmaOutput_t *const motor = &dmaMotors[index];
 

@@ -109,9 +109,14 @@ static uint32_t decode_bb_value(uint32_t value, uint16_t buffer[], uint32_t coun
 }
 
 #ifdef USE_DSHOT_BITBAND
+#ifdef PERF_BB_DECODE
+uint32_t decode_bb_bitband( uint16_t buffer[], uint32_t count, uint32_t bit, timeUs_t now)
+{
+#else
 uint32_t decode_bb_bitband( uint16_t buffer[], uint32_t count, uint32_t bit)
 {
     timeUs_t now = micros();
+#endif
 #ifdef DEBUG_BBDECODE
     memset(sequence, 0, sizeof(sequence));
     sequenceIndex = 0;
@@ -262,6 +267,166 @@ uint32_t decode_bb_bitband( uint16_t buffer[], uint32_t count, uint32_t bit)
 
 #else // USE_DSHOT_BITBAND
 
+#ifdef PERF_BB_DECODE
+// Bits carried by a run of n samples at 3x oversampling: (n + 1) / 3, at
+// least 1. n is the distance between two edges inside the decode window, so
+// below MAX_VALID_BBSAMPLES.
+#define RUN_BITS_X3(n) (n), (n), (n)
+static const uint8_t runBits[MAX_VALID_BBSAMPLES + 3] = {
+    1, 1,
+    RUN_BITS_X3(1), RUN_BITS_X3(2), RUN_BITS_X3(3), RUN_BITS_X3(4), RUN_BITS_X3(5), RUN_BITS_X3(6),
+    RUN_BITS_X3(7), RUN_BITS_X3(8), RUN_BITS_X3(9), RUN_BITS_X3(10), RUN_BITS_X3(11), RUN_BITS_X3(12),
+    RUN_BITS_X3(13), RUN_BITS_X3(14), RUN_BITS_X3(15), RUN_BITS_X3(16), RUN_BITS_X3(17), RUN_BITS_X3(18),
+    RUN_BITS_X3(19), RUN_BITS_X3(20), RUN_BITS_X3(21), RUN_BITS_X3(22), RUN_BITS_X3(23),
+    24,
+};
+#undef RUN_BITS_X3
+
+FAST_CODE uint32_t decode_bb( uint16_t buffer[], uint32_t count, uint32_t bit, timeUs_t now)
+{
+#ifdef DEBUG_BBDECODE
+    memset(sequence, 0, sizeof(sequence));
+    sequenceIndex = 0;
+#endif
+    const uint32_t mask = 1 << bit;
+
+    uint16_t* p = buffer;
+    uint16_t* endP = p + count - MIN_VALID_BBSAMPLES;
+
+    // Jump forward in the buffer to just before where we anticipate the first zero
+    p += preambleSkip;
+
+    DEBUG_SET(DEBUG_DSHOT_TELEMETRY_COUNTS, 3, preambleSkip);  //!< Preamble Skip
+
+    // Eliminate leading high signal level by looking for first zero bit in data stream.
+    // Manual loop unrolling and branch hinting to produce faster code.
+    while (p < endP) {
+        if (__builtin_expect(!(*p++ & mask), 0) ||
+            __builtin_expect(!(*p++ & mask), 0) ||
+            __builtin_expect(!(*p++ & mask), 0) ||
+            __builtin_expect(!(*p++ & mask), 0)) {
+            break;
+        }
+    }
+
+    const uint32_t startMargin = p - buffer;
+
+    if (p >= endP) {
+        // not returning telemetry is ok if the esc cpu is
+        // overburdened.  in that case no edge will be found and
+        // BB_NOEDGE indicates the condition to caller
+        // Increase the start margin
+        if (preambleSkip > 0) {
+            // Increase the start margin
+            preambleSkip--;
+        }
+        return DSHOT_TELEMETRY_NOEDGE;
+    }
+
+    const int remaining = MIN(count - startMargin, (unsigned int)MAX_VALID_BBSAMPLES);
+    endP = p + remaining;
+
+#ifdef DEBUG_BBDECODE
+    sequence[sequenceIndex++] = p - buffer;
+#endif
+
+    // An edge is a sample at the other level than the run before it, which
+    // it ends. The run gets decoded to bits of the form 1000, (n + 1) / 3 of
+    // them for n samples to account for 3x oversampling. An edge only counts
+    // with the sample after it still inside the window, so the last sample
+    // that can carry one is at endP - 2.
+    const uint16_t* const lastP = endP - 2;
+    const uint16_t* runP = p - 1;  // first sample of the run in progress: the zero just found
+    uint32_t lastValue = 0;        // level of that run, 0 or mask
+    const uint32_t mask2 = mask | (mask << 16);
+    uint32_t last2 = 0;            // lastValue in both halves of a word
+    uint32_t value = 0;
+    uint32_t bits = 0;
+
+    // Two samples per 32-bit load, at whatever alignment p has.
+    while (p <= lastP) {
+        uint32_t word;
+        memcpy(&word, p, sizeof(word));
+        uint32_t edges = (word ^ last2) & mask2;
+        if (__builtin_expect(edges == 0, 1)) {
+            memcpy(&word, p + 2, sizeof(word));
+            edges = (word ^ last2) & mask2;
+            if (edges == 0) {
+                p += 4;
+                continue;
+            }
+            p += 2;
+            if (p > lastP) {
+                break;
+            }
+        }
+        // The first of the two samples that differs is the edge.
+        if (!(edges & 0xffff)) {
+            p++;
+            if (p > lastP) {
+                break;
+            }
+        }
+#ifdef DEBUG_BBDECODE
+        sequence[sequenceIndex++] = p + 1 - buffer;
+#endif
+        const uint32_t len = runBits[p - runP];
+        bits += len;
+        value <<= len;
+        value |= 1 << (len - 1);
+        runP = p;
+        lastValue ^= mask;
+        last2 = lastValue | (lastValue << 16);
+        p++;
+    }
+
+    // length of last sequence has to be inferred since the last bit with inverted dshot is high
+    if (bits < 18) {
+        return DSHOT_TELEMETRY_NOEDGE;
+    }
+
+    // length of last sequence has to be inferred since the last bit with inverted dshot is high
+    const int nlen = 21 - bits;
+    if (nlen < 0) {
+        return DSHOT_TELEMETRY_NOEDGE;
+    }
+
+    // Data appears valid
+    if (startMargin < minMargin) {
+        minMargin = startMargin;
+    }
+
+    if (cmpTimeUs(now, nextMarginCheckUs) >= 0) {
+        nextMarginCheckUs += MARGIN_CHECK_INTERVAL_US;
+
+        // Handle a skipped check
+        if (nextMarginCheckUs < now) {
+            nextMarginCheckUs = now + DSHOT_TELEMETRY_START_MARGIN;
+        }
+
+        if (minMargin > DSHOT_TELEMETRY_START_MARGIN) {
+            preambleSkip = minMargin - DSHOT_TELEMETRY_START_MARGIN;
+        } else {
+            preambleSkip = 0;
+        }
+
+        minMargin = UINT32_MAX;
+    }
+
+#ifdef DEBUG_BBDECODE
+    sequence[sequenceIndex] = sequence[sequenceIndex] + (nlen) * 3;
+    sequenceIndex++;
+#endif
+
+    // The anticipated edges were observed
+    if (nlen > 0) {
+        value <<= nlen;
+        value |= 1 << (nlen - 1);
+    }
+
+    return decode_bb_value(value, buffer, count, bit);
+}
+#else
 FAST_CODE uint32_t decode_bb( uint16_t buffer[], uint32_t count, uint32_t bit)
 {
     timeUs_t now = micros();
@@ -390,6 +555,7 @@ FAST_CODE uint32_t decode_bb( uint16_t buffer[], uint32_t count, uint32_t bit)
 
     return decode_bb_value(value, buffer, count, bit);
 }
+#endif
 #endif // USE_DSHOT_BITBAND
 
 #endif

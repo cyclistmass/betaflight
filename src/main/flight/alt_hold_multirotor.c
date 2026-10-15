@@ -42,12 +42,14 @@
 
 #include "alt_hold.h"
 
+#ifndef PERF_HOLD_TASK_SIGNAL
 // TASK_ALTHOLD is event driven off positionEstimatorUpdate(), so it runs as soon
 // as a new altitude estimate exists rather than at an arbitrary phase relative to
 // it. If the estimator is not running at all (TASK_POSITION disabled) this is the
 // interval after which the task falls back to periodic scheduling, so that mode
 // entry and exit are still serviced.
 #define ALTHOLD_FALLBACK_PERIOD_US (2 * TASK_PERIOD_HZ(ALTHOLD_TASK_RATE_HZ))
+#endif
 
 typedef struct {
     bool isActive;
@@ -195,6 +197,7 @@ static void altHoldUpdate(timeUs_t taskIntervalUs)
     altitudeControl(targetAltitudeCm, taskIntervalUs, targetAltitudeVelocity, velLimitCmS);
 }
 
+#ifndef PERF_HOLD_TASK_SIGNAL
 bool altHoldUpdateCheck(timeUs_t currentTimeUs, timeDelta_t currentDeltaTimeUs)
 {
     UNUSED(currentTimeUs);
@@ -206,6 +209,7 @@ bool altHoldUpdateCheck(timeUs_t currentTimeUs, timeDelta_t currentDeltaTimeUs)
     // No estimator running, so fall back to periodic scheduling
     return currentDeltaTimeUs >= ALTHOLD_FALLBACK_PERIOD_US;
 }
+#endif
 
 void updateAltHold(timeUs_t currentTimeUs) {
     UNUSED(currentTimeUs);

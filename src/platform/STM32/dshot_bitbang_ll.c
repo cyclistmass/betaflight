@@ -177,7 +177,11 @@ static void bbSaveDMARegs(dmaResource_t *dmaResource, dmaRegCache_t *dmaRegCache
 }
 #endif
 
+#ifdef PERF_BB_ITCM
+FAST_CODE bool bbSwitchToOutput(bbPort_t * bbPort)
+#else
 bool bbSwitchToOutput(bbPort_t * bbPort)
+#endif
 {
     dmaResource_t *dmaResource = bbPort->dmaResource;
 

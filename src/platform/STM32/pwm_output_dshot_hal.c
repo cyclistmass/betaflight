@@ -93,8 +93,16 @@ void pwmDshotSetDirectionOutput(
     xLL_EX_DMA_EnableIT_TC(motor->dmaRef);
 }
 
+// PERF_BB_ITCM moves the timer DShot path out of ITCM to make room for the bitbang one;
+// FAST_CODE_PREF keeps it in ITCM on targets that have the space.
+#ifdef PERF_BB_ITCM
+#define DSHOT_TIMER_CODE FAST_CODE_PREF
+#else
+#define DSHOT_TIMER_CODE FAST_CODE
+#endif
+
 #ifdef USE_DSHOT_TELEMETRY
-FAST_CODE static void pwmDshotSetDirectionInput(
+DSHOT_TIMER_CODE static void pwmDshotSetDirectionInput(
     motorDmaOutput_t * const motor
 )
 {
@@ -138,7 +146,7 @@ FAST_CODE static void pwmDshotSetDirectionInput(
 }
 #endif
 
-FAST_CODE void pwmCompleteDshotMotorUpdate(void)
+DSHOT_TIMER_CODE void pwmCompleteDshotMotorUpdate(void)
 {
     /* If there is a dshot command loaded up, time it correctly with motor update*/
     if (!dshotCommandQueueEmpty() && !dshotCommandOutputIsEnabled(dshotMotorCount)) {
@@ -181,7 +189,7 @@ FAST_CODE void pwmCompleteDshotMotorUpdate(void)
     }
 }
 
-FAST_CODE static void motor_DMA_IRQHandler(dmaChannelDescriptor_t* descriptor)
+DSHOT_TIMER_CODE static void motor_DMA_IRQHandler(dmaChannelDescriptor_t* descriptor)
 {
     if (DMA_GET_FLAG_STATUS(descriptor, DMA_IT_TCIF)) {
         motorDmaOutput_t * const motor = &dmaMotors[descriptor->userParam];

@@ -68,7 +68,9 @@ extern "C" {
     extern float testAltitudeAccelerationCmS;
     extern float testCosTiltAngle;
     extern throttleStatus_e testThrottleStatus;
+#ifndef PERF_HOLD_TASK_SIGNAL
     extern bool testEstimatorUpdatePending;
+#endif
     extern timeDelta_t testTaskDeltaTimeUs;
     extern bool testNavActive;
     extern bool testNavReached;
@@ -99,7 +101,9 @@ protected:
         testAltitudeAccelerationCmS = 0.0f;
         testCosTiltAngle = 1.0f;
         testThrottleStatus = THROTTLE_LOW;
+#ifndef PERF_HOLD_TASK_SIGNAL
         testEstimatorUpdatePending = false;
+#endif
         testTaskDeltaTimeUs = TASK_PERIOD_HZ(ALTHOLD_TASK_RATE_HZ);
         testNavActive = false;
         testNavReached = false;
@@ -254,6 +258,7 @@ TEST_F(AltholdControlUnittest, AltitudeControlCompensatesForTilt)
     EXPECT_GT(tiltedThrottle, levelThrottle);
 }
 
+#ifndef PERF_HOLD_TASK_SIGNAL
 // TASK_ALTHOLD is event driven off positionEstimatorUpdate() rather than run on a
 // fixed period, so it starts as soon as a new altitude estimate exists.
 TEST_F(AltholdControlUnittest, AltHoldIsScheduledByEstimatorUpdates)
@@ -270,6 +275,7 @@ TEST_F(AltholdControlUnittest, AltHoldIsScheduledByEstimatorUpdates)
     EXPECT_FALSE(altHoldUpdateCheck(currentTimeUs, TASK_PERIOD_HZ(ALTHOLD_TASK_RATE_HZ)));
     EXPECT_TRUE(altHoldUpdateCheck(currentTimeUs, 2 * TASK_PERIOD_HZ(ALTHOLD_TASK_RATE_HZ)));
 }
+#endif
 
 // Event driven scheduling makes the task interval the estimator's, so dt has to
 // be measured. It is bounded, so a first run or a starved one cannot hand the
@@ -391,6 +397,7 @@ extern "C" {
     void positionEstimatorEnableXY(bool /*enable*/) { }
     bool positionEstimatorIsValidXY(void) { return false; }
 
+#ifndef PERF_HOLD_TASK_SIGNAL
     bool testEstimatorUpdatePending = false;
     bool positionEstimatorTakeUpdate(positionEstimatorConsumer_e /*consumer*/)
     {
@@ -398,6 +405,7 @@ extern "C" {
         testEstimatorUpdatePending = false;
         return pending;
     }
+#endif
 
     void positionNavInit(void) { }
     void positionNavReset(void) { }

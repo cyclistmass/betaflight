@@ -44,8 +44,9 @@ althold_unittest_SRC := \
 		$(USER_DIR)/common/filter.c \
 		$(USER_DIR)/pg/rx.c
 
-althold_unittest_DEFINES := \
+althold_unittest_DEFINES = \
 		USE_ALTITUDE_HOLD= \
+		$(if $1,PERF_HOLD_TASK_SIGNAL=)
 
 autopilot_wing_unittest_SRC := \
 		$(USER_DIR)/flight/autopilot_wing.c \
@@ -65,14 +66,15 @@ autopilot_wing_unittest_SRC := \
 		$(USER_DIR)/common/vector.c \
 		$(USER_DIR)/common/filter.c
 
-autopilot_wing_unittest_DEFINES := \
+autopilot_wing_unittest_DEFINES = \
 		USE_WING= \
 		USE_LAUNCH_WING= \
 		USE_ALTITUDE_HOLD= \
 		USE_POSITION_HOLD= \
 		USE_GPS= \
 		USE_GPS_RESCUE= \
-		USE_ACC=
+		USE_ACC= \
+		$(if $1,PERF_HOLD_TASK_SIGNAL=)
 
 arming_prevention_unittest_SRC := \
 		$(USER_DIR)/common/bitarray.c \
@@ -550,8 +552,9 @@ scheduler_unittest_SRC := \
 		$(USER_DIR)/common/streambuf.c \
 		$(TEST_DIR)/scheduler_stubs.c
 
-scheduler_unittest_DEFINES := \
-		USE_OSD=
+scheduler_unittest_DEFINES = \
+		USE_OSD= \
+		$(if $1,PERF_SCHED_TASK_AGE= PERF_HOLD_TASK_SIGNAL=)
 
 serial_feature_map_unittest_SRC := \
 		$(USER_DIR)/io/serial_feature_map.c
@@ -777,8 +780,9 @@ poshold_unittest_SRC := \
 		$(USER_DIR)/common/filter.c \
 		$(USER_DIR)/pg/rx.c
 
-poshold_unittest_DEFINES := \
-		USE_POSITION_HOLD=
+poshold_unittest_DEFINES = \
+		USE_POSITION_HOLD= \
+		$(if $1,PERF_HOLD_TASK_SIGNAL=)
 
 landing_wing_unittest_SRC := \
 		$(USER_DIR)/flight/landing_wing.c \
@@ -1134,6 +1138,8 @@ TESTS_TARGET_SPECIFIC = $(foreach test,$(TEST_BASENAMES),$(if $($(test)_EXPAND),
 
 TESTS = $(foreach test,$(TEST_BASENAMES),$(if $($(test)_EXPAND),,$(test)))
 TESTS += $(addprefix accgyro_spi_lsm6dsv16x_unittest.,16x 32x 320x)
+# F722 perf switches: each test below also runs once with its PERF_ flags on
+TESTS += $(addsuffix .perf,scheduler_unittest althold_unittest poshold_unittest autopilot_wing_unittest)
 TESTS_ALL = $(TESTS)
 
 # All Google Test headers.  Usually you shouldn't change this

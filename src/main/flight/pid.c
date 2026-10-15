@@ -533,8 +533,16 @@ void pidAcroTrainerInit(void)
 float pidApplyThrustLinearization(float motorOutput)
 {
     const float e = pidRuntime.thrustLinearization;
+#ifdef PERF_MIXER
+    // With e = 0 the curve is the identity, so the arithmetic is skipped.
+    if (e != 0.0f) {
+        const float inv = 1.0f - motorOutput;
+        motorOutput *= 1.0f + e * inv * (1.0f + e * (inv - motorOutput));
+    }
+#else
     const float inv = 1.0f - motorOutput;
     motorOutput *= 1.0f + e * inv * (1.0f + e * (inv - motorOutput));
+#endif
     return motorOutput;
 }
 

@@ -35,9 +35,11 @@
 #include "pg/pos_hold.h"
 #include "pos_hold.h"
 
+#ifndef PERF_HOLD_TASK_SIGNAL
 // Event driven off positionEstimatorUpdate(); without the estimator the task falls back to
 // periodic scheduling so that mode entry and exit are still serviced.
 #define POSHOLD_FALLBACK_PERIOD_US (2 * TASK_PERIOD_HZ(POSHOLD_TASK_RATE_HZ))
+#endif
 
 static bool isEnabled;
 
@@ -46,6 +48,7 @@ void posHoldInit(void)
     isEnabled = false;
 }
 
+#ifndef PERF_HOLD_TASK_SIGNAL
 bool posHoldUpdateCheck(timeUs_t currentTimeUs, timeDelta_t currentDeltaTimeUs)
 {
     UNUSED(currentTimeUs);
@@ -56,6 +59,7 @@ bool posHoldUpdateCheck(timeUs_t currentTimeUs, timeDelta_t currentDeltaTimeUs)
 
     return currentDeltaTimeUs >= POSHOLD_FALLBACK_PERIOD_US;
 }
+#endif
 
 // The aircraft loiters about where position hold engaged. The roll stick takes over the steering,
 // and the loiter starts again about wherever it is let go; the pitch stick belongs to altitude hold.
