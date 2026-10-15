@@ -6,7 +6,7 @@
 > CPU wait in a busy loop until the reply ends: up to 62 us of a 125 us loop at 8 kHz. The spin fixes skip that
 > one motor update instead, so the ESC keeps its last throttle for one more loop.
 >
-> - Where the performance was found: [F722-PERF-FINDINGS.md](F722-PERF-FINDINGS.md)
+> - Where the performance was found: [F722-PERF-FINDINGS.md](F722-PERF-FINDINGS.md), or the illustrated version as [PDF](docs/f722/F722-PERF-FINDINGS.pdf)
 > - How to test: [F722-PERF-TESTING.md](F722-PERF-TESTING.md)
 > - Build switches: [src/main/build/perf_switches.h](src/main/build/perf_switches.h)
 > - Test firmware: [f722-test-900f67102](https://github.com/cyclistmass/betaflight/releases/tag/f722-test-900f67102)

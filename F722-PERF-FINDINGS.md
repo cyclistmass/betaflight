@@ -4,7 +4,8 @@
 
 PR #15779 forces DShot300 and a 4 kHz PID loop on F7 when bidirectional DShot is on. This file sums up what
 was measured, what was changed, and the "don't spin" fix that targets the cause. How to test it is in
-[F722-PERF-TESTING.md](F722-PERF-TESTING.md). Prebuilt test firmware:
+[F722-PERF-TESTING.md](F722-PERF-TESTING.md). The illustrated version of this file is [docs/f722/F722-PERF-FINDINGS.pdf](docs/f722/F722-PERF-FINDINGS.pdf).
+Prebuilt test firmware:
 [f722-test-900f67102](https://github.com/cyclistmass/betaflight/releases/tag/f722-test-900f67102).
 
 **What "the spin" means.** With bidirectional DShot, each motor pin does two jobs every loop. It sends the
