@@ -70,7 +70,11 @@
 
 #define USE_EXTI
 
+// TEST ONLY: build with EXTRA_FLAGS=-DTEST_UNGATE_PID_DENOM_CHECK to skip the
+// bidir DShot600 -> DShot300 and PID <= 4 kHz downgrade (#15779). Never release.
+#ifndef TEST_UNGATE_PID_DENOM_CHECK
 #define USE_PID_DENOM_CHECK
+#endif
 
 #define FLASH_PAGE_SIZE ((uint32_t)0x4000) // 16K sectors
 
