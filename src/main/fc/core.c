@@ -115,6 +115,13 @@
 #include "sensors/boardalignment.h"
 #include "sensors/compass.h"
 #include "sensors/gyro.h"
+#ifdef DSHOT_BB_PROBE
+#include "sensors/gyro_init.h"
+
+// TEST ONLY: filled here, in scheduler.c and in the STM32 bitbang driver, which
+// publishes it. Defined here so that the probe links on every platform.
+dtProbe_t dtProbe;
+#endif
 
 #include "telemetry/telemetry.h"
 
@@ -1562,6 +1569,18 @@ static FAST_CODE_NOINLINE void subTaskRcCommand(timeUs_t currentTimeUs)
 FAST_CODE void taskGyroSample(timeUs_t currentTimeUs)
 {
     UNUSED(currentTimeUs);
+#ifdef DSHOT_BB_PROBE
+    {
+        // Gyro EXTI to the start of the gyro task. Nominal is the SPI DMA
+        // duration the scheduler locks to; a value above the gyro period means
+        // a sample was consumed late or skipped.
+        const gyroDev_t *gyroDev = gyroActiveDev();
+        const uint32_t latencyUs = clockCyclesToMicros(cmpTimeCycles(getCycleCounter(), gyroDev->gyroLastEXTI));
+        if (latencyUs > dtProbe.gyroLatMaxUs) {
+            dtProbe.gyroLatMaxUs = latencyUs;
+        }
+    }
+#endif
     gyroUpdate();
     if (pidUpdateCounter % activePidLoopDenom == 0) {
         pidUpdateCounter = 0;

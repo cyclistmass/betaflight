@@ -435,10 +435,12 @@ static timeUs_t lastXYMeasurementUs = 0;
 static timeUs_t lastZMeasurementUs = 0;
 static unsigned debugAxis; // 0 for East, 1 for North; selected by gyro_filter_debug_axis
 
+#ifndef PERF_HOLD_TASK_SIGNAL
 // One bit per positionEstimatorConsumer_e, set by every positionEstimatorUpdate()
 // and cleared as each consumer takes the event. Drives the event-based scheduling
 // of TASK_ALTHOLD and TASK_POSHOLD.
 static uint8_t pendingUpdateMask = 0;
+#endif
 
 static sensorCalEntry_t zCal[CAL_Z_COUNT];
 
@@ -523,7 +525,9 @@ void positionEstimatorInit(void)
     xyEnabled = false;
     lastXYMeasurementUs = 0;
     lastZMeasurementUs = 0;
+#ifndef PERF_HOLD_TASK_SIGNAL
     pendingUpdateMask = 0;
+#endif
     debugAxis = (gyroConfig()->gyro_filter_debug_axis == FD_PITCH) ? 1 : 0; //  0 for East, 1 for North
 
 
@@ -1402,10 +1406,13 @@ void positionEstimatorUpdate(void)
     estimate.trustXY = 1.0f / (1.0f + xyVar / 10000.0f);
     estimate.trustZ = 1.0f / (1.0f + kalmanGetPositionVariance(&kfUp) / 10000.0f);
 
+#ifndef PERF_HOLD_TASK_SIGNAL
     // Publish the update last, so a consumer woken by it reads a complete estimate.
     pendingUpdateMask = (1 << POS_EST_CONSUMER_COUNT) - 1;
+#endif
 }
 
+#ifndef PERF_HOLD_TASK_SIGNAL
 bool positionEstimatorTakeUpdate(positionEstimatorConsumer_e consumer)
 {
     const uint8_t bit = 1 << consumer;
@@ -1415,6 +1422,7 @@ bool positionEstimatorTakeUpdate(positionEstimatorConsumer_e consumer)
     }
     return false;
 }
+#endif
 
 const positionEstimate3d_t *positionEstimatorGetEstimate(void)
 {

@@ -26,7 +26,9 @@
 #define POSHOLD_TASK_RATE_HZ 100 // hz
 
 void posHoldInit(void);
+#ifndef PERF_HOLD_TASK_SIGNAL
 bool posHoldUpdateCheck(timeUs_t currentTimeUs, timeDelta_t currentDeltaTimeUs);
+#endif
 void updatePosHold(timeUs_t currentTimeUs);
 
 bool posHoldFailure(void);

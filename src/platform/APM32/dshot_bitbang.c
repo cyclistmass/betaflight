@@ -533,6 +533,9 @@ static bool bbDecodeTelemetry(void)
 #ifdef USE_DSHOT_TELEMETRY_STATS
         const timeMs_t currentTimeMs = millis();
 #endif
+#ifdef PERF_BB_DECODE
+        const timeUs_t nowUs = micros();
+#endif
 
 #ifdef USE_DSHOT_CACHE_MGMT
         for (int i = 0; i < usedMotorPorts; i++) {
@@ -550,7 +553,11 @@ static bool bbDecodeTelemetry(void)
             uint32_t rawValue = decode_bb_bitband(
                 bbMotors[motorIndex].bbPort->portInputBuffer,
                 bbMotors[motorIndex].bbPort->portInputCount,
+#ifdef PERF_BB_DECODE
+                bbMotors[motorIndex].pinIndex, nowUs);
+#else
                 bbMotors[motorIndex].pinIndex);
+#endif
 #endif
             if (rawValue == DSHOT_TELEMETRY_NOEDGE) {
                 DEBUG_SET(DEBUG_DSHOT_TELEMETRY_COUNTS, 1, debug[1] + 1);  //!< Missing Edge Count

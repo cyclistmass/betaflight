@@ -45,9 +45,11 @@
 
 #include "alt_hold.h"
 
+#ifndef PERF_HOLD_TASK_SIGNAL
 // Event driven off positionEstimatorUpdate(); without the estimator the task falls back to
 // periodic scheduling so that mode entry and exit are still serviced.
 #define ALTHOLD_FALLBACK_PERIOD_US (2 * TASK_PERIOD_HZ(ALTHOLD_TASK_RATE_HZ))
+#endif
 #define ALTHOLD_TARGET_LEAD_S       1.0f
 
 typedef struct {
@@ -195,6 +197,7 @@ float altHoldGetTargetAltitudeCm(void)
 }
 #endif
 
+#ifndef PERF_HOLD_TASK_SIGNAL
 bool altHoldUpdateCheck(timeUs_t currentTimeUs, timeDelta_t currentDeltaTimeUs)
 {
     UNUSED(currentTimeUs);
@@ -205,6 +208,7 @@ bool altHoldUpdateCheck(timeUs_t currentTimeUs, timeDelta_t currentDeltaTimeUs)
 
     return currentDeltaTimeUs >= ALTHOLD_FALLBACK_PERIOD_US;
 }
+#endif
 
 void updateAltHold(timeUs_t currentTimeUs)
 {

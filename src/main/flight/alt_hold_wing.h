@@ -36,7 +36,9 @@ void altHoldSetEmergencyDescent(bool active, float rateCmS);
 // Coming down to land where it is, the ground has been met and the throttle is closed.
 bool altHoldGroundContact(void);
 
+#ifndef PERF_HOLD_TASK_SIGNAL
 bool altHoldUpdateCheck(timeUs_t currentTimeUs, timeDelta_t currentDeltaTimeUs);
+#endif
 void updateAltHold(timeUs_t currentTimeUs);
 bool isAltHoldActive(void);
 

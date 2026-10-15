@@ -132,8 +132,13 @@ static void calculateThrottleAndCurrentMotorEndpoints(timeUs_t currentTimeUs)
     static bool itermHoldActive = false; // set on reversal, so reversalTimeUs is only compared while fresh
     static float motorRangeMinIncrease = 0;
 
+#ifndef PERF_MIXER
     float currentThrottleInputRange = 0;
+#endif
     if (mixerRuntime.feature3dEnabled) {
+#ifdef PERF_MIXER
+        float currentThrottleInputRange = 0;
+#endif
         float rcCommand3dDeadBandLow;
         float rcCommand3dDeadBandHigh;
         const float midThrottle = rcUsToThrottle(rxConfig()->midrc);
@@ -235,9 +240,17 @@ static void calculateThrottleAndCurrentMotorEndpoints(timeUs_t currentTimeUs)
                 itermHoldActive = false;
             }
         }
+#ifdef PERF_MIXER
+
+        // scale the throttle from the active 3D band to 0..1; outside 3D mode the
+        // stick already spans the full range so there is nothing to divide by
+        throttle /= currentThrottleInputRange;
+#endif
     } else {
         throttle = rcCommand[THROTTLE] + rcUsSpanToThrottle(throttleAngleCorrection);
+#ifndef PERF_MIXER
         currentThrottleInputRange = 1.0f;
+#endif
 #ifdef USE_DYN_IDLE
         if (mixerRuntime.dynIdleMinRps > 0.0f) {
             const float maxIncrease = wasThrottleRaised()
@@ -283,7 +296,11 @@ static void calculateThrottleAndCurrentMotorEndpoints(timeUs_t currentTimeUs)
         motorOutputMixSign = 1;
     }
 
+#ifdef PERF_MIXER
+    throttle = constrainf(throttle, 0.0f, 1.0f);
+#else
     throttle = constrainf(throttle / currentThrottleInputRange, 0.0f, 1.0f);
+#endif
     rcThrottle = throttle;
 }
 
@@ -466,6 +483,10 @@ float getMotorOutputRms(void)
 
 static void applyMixToMotors(const float motorMix[MAX_SUPPORTED_MOTORS], motorMixer_t *activeMixer)
 {
+#ifdef PERF_MIXER
+    const bool failsafeActive = failsafeIsActive(); // loop invariant, read once rather than once per motor
+
+#endif
     // Now add in the desired throttle, but keep in a range that doesn't clip adjusted
     // roll/pitch/yaw. This could move throttle down, but also up for those low throttle flips.
     for (int i = 0; i < mixerRuntime.motorCount; i++) {
@@ -480,7 +501,11 @@ static void applyMixToMotors(const float motorMix[MAX_SUPPORTED_MOTORS], motorMi
             motorOutput += mixerTricopterMotorCorrection(i);
         }
 #endif
+#ifdef PERF_MIXER
+        if (failsafeActive) {
+#else
         if (failsafeIsActive()) {
+#endif
 #ifdef USE_DSHOT
             if (isMotorProtocolDshot()) {
                 motorOutput = (motorOutput < motorRangeMin) ? mixerRuntime.disarmMotorOutput : motorOutput; // Prevent getting into special reserved range

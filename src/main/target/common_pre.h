@@ -20,6 +20,8 @@
 
 #pragma once
 
+#include "build/perf_switches.h"
+
 /*
 
     The purpose of this file is to enable the firmware "gates" for features and drivers

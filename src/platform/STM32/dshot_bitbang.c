@@ -133,7 +133,69 @@ const timerHardware_t bbTimerHardware[] = {
 
 static FAST_DATA_ZERO_INIT timeUs_t lastSendUs;
 
+// PERF_BB_ITCM: run the bitbang DShot hot path (write, update, decode, DMA IRQ) from ITCM.
+#ifdef PERF_BB_ITCM
+#define BB_HOT_CODE FAST_CODE
+#define BB_IRQ_CODE FAST_CODE
+#else
+#define BB_HOT_CODE
+#define BB_IRQ_CODE FAST_IRQ_HANDLER
+#endif
+
+// DSHOT_BB_NOSPIN (build/perf_switches.h) picks how a motor update that finds the previous
+// frame still on the wire is handled: 0 spins until the line is free (master), 1/2/3 defer
+// the frame to the next loop, as written independently by three lanes (Opus, GPT 5.6 Sol,
+// Fable). The capture is never cut short in any of them (#15533).
+#if DSHOT_BB_NOSPIN
+// Set when the previous frame still owns the line, so this motor update is skipped:
+// bbWriteInt(), bbUpdateComplete() and bbDecodeTelemetry() leave buffers and stream alone.
+static FAST_DATA_ZERO_INIT bool bbFrameDeferred;
+#endif
+
 static motorProtocolTypes_e motorProtocol;
+
+#ifdef DSHOT_BB_PROBE
+#include "common/maths.h"
+#include "drivers/system.h"  // getCycleCounter(), clockCyclesToMicros()
+
+// Called from bbUpdateComplete() at every send, task context. Tracks the
+// send-to-send gap and, once a second, publishes the window to debug[0..7]
+// when debug_mode is NONE, then starts a new window.
+static void dtProbeWindow(timeUs_t nowUs)
+{
+    if (lastSendUs != 0) {
+        const uint32_t gapUs = cmpTimeUs(nowUs, lastSendUs);
+        if (gapUs < dtProbe.gapMinUs) {
+            dtProbe.gapMinUs = gapUs;
+        }
+        if (gapUs > dtProbe.gapMaxUs) {
+            dtProbe.gapMaxUs = gapUs;
+        }
+    }
+
+    if (cmpTimeUs(nowUs, dtProbe.windowStartUs) >= 1000000) {
+        if (debugMode == DEBUG_NONE) {
+            debug[0] = MIN(dtProbe.waitMaxUs, (uint32_t)INT16_MAX);                      // max spin in bbTelemetryWait [us]
+            debug[1] = MIN(dtProbe.waitCount, (uint32_t)INT16_MAX);                      // updates that spun or were deferred
+            debug[2] = (dtProbe.gapMinUs == UINT32_MAX) ? 0 : MIN(dtProbe.gapMinUs, (uint32_t)INT16_MAX); // min send gap [us]
+            debug[3] = MIN(dtProbe.gapMaxUs, (uint32_t)INT16_MAX);                       // max send gap [us]
+            debug[4] = MIN(dtProbe.gyroLatMaxUs, (uint32_t)INT16_MAX);                   // max gyro EXTI -> TASK_GYRO [us]
+            debug[5] = MIN(dtProbe.schedSkips, (uint32_t)INT16_MAX);                     // gyro cycles skipped by the scheduler
+            debug[6] = MIN(dtProbe.outputBusy, (uint32_t)INT16_MAX);                     // updates with the output DMA still running
+            debug[7] = MIN(dtProbe.waitSumUs / 1000, (uint32_t)INT16_MAX);               // total spin [0.1% of the second]
+        }
+        dtProbe.windowStartUs = nowUs;
+        dtProbe.waitMaxUs = 0;
+        dtProbe.waitCount = 0;
+        dtProbe.waitSumUs = 0;
+        dtProbe.gapMinUs = UINT32_MAX;
+        dtProbe.gapMaxUs = 0;
+        dtProbe.gyroLatMaxUs = 0;
+        dtProbe.schedSkips = 0;
+        dtProbe.outputBusy = 0;
+    }
+}
+#endif
 
 // DMA GPIO output buffer formatting
 
@@ -310,7 +372,7 @@ static void bbSetupDma(bbPort_t *bbPort)
     bbDMA_ITConfig(bbPort);
 }
 
-FAST_IRQ_HANDLER void bbDMAIrqHandler(dmaChannelDescriptor_t *descriptor)
+BB_IRQ_CODE void bbDMAIrqHandler(dmaChannelDescriptor_t *descriptor)
 {
     dbgPinHi(0);
 
@@ -510,6 +572,7 @@ static bool bbMotorConfig(IO_t io, uint8_t motorIndex, motorProtocolTypes_e pwmP
     return true;
 }
 
+#if DSHOT_BB_NOSPIN == 0
 static bool bbTelemetryWait(void)
 {
     // The capture must not be cut short: the window is only a few microseconds
@@ -523,6 +586,9 @@ static bool bbTelemetryWait(void)
     bool telemetryPending;
     bool telemetryWait = false;
     const timeUs_t startTimeUs = micros();
+#ifdef DSHOT_BB_PROBE
+    const uint32_t probeStartCycles = getCycleCounter();
+#endif
 
     do {
         telemetryPending = false;
@@ -552,22 +618,209 @@ static bool bbTelemetryWait(void)
         }
     } while (telemetryPending);
 
+#ifdef DSHOT_BB_PROBE
+    if (telemetryWait) {
+        const uint32_t spinUs = clockCyclesToMicros(cmpTimeCycles(getCycleCounter(), probeStartCycles));
+        dtProbe.waitCount++;
+        dtProbe.waitSumUs += spinUs;
+        if (spinUs > dtProbe.waitMaxUs) {
+            dtProbe.waitMaxUs = spinUs;
+        }
+    }
+#endif
+
     return telemetryWait;
 }
-
-static void bbUpdateInit(void)
+#elif DSHOT_BB_NOSPIN == 1
+#ifdef USE_DSHOT_TELEMETRY
+// Opus. Return true if a port is still busy with the previous frame: the command is
+// still being clocked out or the ESC reply is still being captured.
+// bbUpdateComplete() raises telemetryPending when it starts a frame, and
+// bbDMAIrqHandler() drops it when the capture completes.
+//
+// The capture must not be cut short: the window is only a few microseconds
+// longer than the ESC reply (~62 us against ~58 us at DShot600), so aborting
+// it leaves bbSwitchToOutput() driving the line push-pull against a still
+// transmitting ESC. That contention couples into the 3.3 V rail and has been
+// seen to corrupt I2C barometers on AIO boards (#15533).
+//
+// This used to spin until the capture ended, which cost up to a whole capture
+// window (~62 us at DShot600) in the PID task: half an 8 kHz loop. Instead the
+// caller skips this motor update. The next one comes a loop later and finds
+// the port free, so a skip costs one frame, not a loop of CPU.
+//
+// The window is timer paced and always completes, so the timeout is a backstop
+// for a stalled DMA only. It counts from the start of the frame: the output
+// frame plus the capture window plus 25%.
+static NOINLINE bool bbTelemetryBusy(void)
 {
+    bool telemetryPending = false;
+    for (int i = 0; i < usedMotorPorts; i++) {
+        telemetryPending |= bbPorts[i].telemetryPending;
+    }
+
+    if (!telemetryPending) {
+        return false;
+    }
+
+    if (cmpTimeUs(micros(), lastSendUs) <= (timeDelta_t)dshotFrameUs + bbTelemetryTimeoutUs) {
+        return true;
+    }
+
+    // Leave the stream for bbUpdateComplete() to reinitialise, as it does
+    // on every cycle; stopping it here would additionally race
+    // bbDMAIrqHandler() on the pacer TIMx->DIER, which is shared with the
+    // other port group. The buffers may hold a partial frame, so skip
+    // them rather than decode a bad-but-valid GCR frame.
+    for (int i = 0; i < usedMotorPorts; i++) {
+        if (bbPorts[i].telemetryPending) {
+            bbPorts[i].telemetryAborted = true;
+        }
+    }
+    DEBUG_SET(DEBUG_DSHOT_TELEMETRY_COUNTS, 2, debug[2] + 1);  //!< Reception Timeout Count
+
+    return false;
+}
+#endif
+#elif DSHOT_BB_NOSPIN == 2
+// GPT 5.6 Sol. Returns at once: a frame younger than the output plus capture guard
+// (105 us at DShot600) is skipped this update; an older pending capture is treated
+// as a stalled DMA and handed to the normal reinitialisation path.
+static bool bbTelemetryWait(void)
+{
+    bool telemetryBusy = false;
+    const timeDelta_t frameAgeUs = cmpTimeUs(micros(), lastSendUs);
+    const timeDelta_t frameGuardUs = dshotFrameUs + bbTelemetryTimeoutUs;
+
+#ifdef USE_DSHOT_TELEMETRY
+    if (useDshotTelemetry) {
+        bool telemetryTimeout = false;
+
+        for (int i = 0; i < usedMotorPorts; i++) {
+            bbPort_t *bbPort = &bbPorts[i];
+            if (!bbPort->telemetryPending) {
+                continue;
+            }
+
+            if (frameAgeUs > frameGuardUs) {
+                // The ESC has had longer than the output and capture windows.
+                // Recover a stalled DMA on the normal reinitialisation path.
+                bbPort->telemetryPending = false;
+                bbPort->telemetryAborted = true;
+                bbPort->reinitRequired = true;
+                telemetryTimeout = true;
+            } else {
+                telemetryBusy = true;
+            }
+        }
+
+        if (telemetryTimeout) {
+            DEBUG_SET(DEBUG_DSHOT_TELEMETRY_COUNTS, 2, debug[2] + 1);  //!< Reception Timeout Count
+        }
+    }
+#endif
+
+    // Also cover the interval before the output-complete IRQ sets telemetryPending.
+    telemetryBusy |= lastSendUs && frameAgeUs >= 0 && frameAgeUs <= frameGuardUs;
+    bbFrameDeferred = telemetryBusy;
+
+    return telemetryBusy;
+}
+#elif DSHOT_BB_NOSPIN == 3
+// Fable. True while the previous frame still owns the line on any port group: its
+// telemetry capture is pending, or its output DMA is still running (two
+// updates less than a frame apart).
+static BB_HOT_CODE bool bbLineBusy(void)
+{
+    for (int i = 0; i < usedMotorPorts; i++) {
+        const bbPort_t *bbPort = &bbPorts[i];
+        if (bbPort->telemetryPending
+            || (bbPort->direction == DSHOT_BITBANG_DIRECTION_OUTPUT && IS_DMA_ENABLED(bbPort->dmaResource))) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+static bool bbTelemetryWait(void)
+{
+    // Nothing waits here any more: bbUpdateInit() has already decided whether
+    // this update goes out. Kept so motorWriteAll() can keep its call order.
+    return bbFrameDeferred;
+}
+#endif
+
+static BB_HOT_CODE void bbUpdateInit(void)
+{
+#if DSHOT_BB_NOSPIN == 1
+#ifdef USE_DSHOT_TELEMETRY
+    // Decide here, before the output buffers are touched: during the output
+    // phase the DMA is still reading them.
+    bbFrameDeferred = useDshotTelemetry && bbTelemetryBusy();
+    if (bbFrameDeferred) {
+        return;
+    }
+#endif
+#elif DSHOT_BB_NOSPIN == 2
+    bbFrameDeferred = false;
+#elif DSHOT_BB_NOSPIN == 3
+    bbFrameDeferred = false;
+
+    if (bbLineBusy()) {
+        // The capture must not be cut short (#15533). Waiting for it instead, as
+        // bbTelemetryWait() used to, spins in the PID task for the rest of the window,
+        // up to the whole ~62 us at DShot600: half an 8 kHz loop, spent making a loop
+        // that is already late later still. So the frame is deferred: the buffers and
+        // the stream are left alone this update and the next PID loop sends fresh
+        // values. The ESC misses one update, 125 us at 8 kHz, far below any DShot
+        // signal timeout. An output DMA still running is deferred for the same
+        // reason: the new values would otherwise be written into the buffer it reads.
+        if (cmpTimeUs(micros(), lastSendUs) <= (timeDelta_t)dshotFrameUs + bbTelemetryTimeoutUs) {
+            bbFrameDeferred = true;
+            DEBUG_SET(DEBUG_DSHOT_TELEMETRY_COUNTS, 4, debug[4] + 1);  //!< Deferred Frame Count
+            return;
+        }
+
+        // A port still busy after the frame plus capture backstop has a stalled
+        // stream. Leave it for bbUpdateComplete() to reinitialise, as it does on
+        // every cycle. The buffers may hold a partial frame, so skip them rather
+        // than decode a bad-but-valid GCR frame.
+        for (int i = 0; i < usedMotorPorts; i++) {
+            if (bbPorts[i].telemetryPending) {
+                bbPorts[i].telemetryAborted = true;
+            }
+        }
+        DEBUG_SET(DEBUG_DSHOT_TELEMETRY_COUNTS, 2, debug[2] + 1);  //!< Reception Timeout Count
+    }
+#endif
     for (int i = 0; i < usedMotorPorts; i++) {
         bbOutputDataClear(bbPorts[i].portOutputBuffer);
     }
 }
 
-static bool bbDecodeTelemetry(void)
+static BB_HOT_CODE bool bbDecodeTelemetry(void)
 {
+#if DSHOT_BB_NOSPIN == 2
+    if (bbFrameDeferred) {
+        bbFrameDeferred = false;
+        return false;
+    }
+#endif
 #ifdef USE_DSHOT_TELEMETRY
     if (useDshotTelemetry) {
+#if DSHOT_BB_NOSPIN == 1 || DSHOT_BB_NOSPIN == 3
+        if (bbFrameDeferred) {
+            // The capture is still running: nothing complete to decode yet.
+            // It is decoded after the next update that does go out.
+            return true;
+        }
+#endif
 #ifdef USE_DSHOT_TELEMETRY_STATS
         const timeMs_t currentTimeMs = millis();
+#endif
+#ifdef PERF_BB_DECODE
+        const timeUs_t nowUs = micros();
 #endif
 
 #ifdef USE_DSHOT_CACHE_MGMT
@@ -586,12 +839,20 @@ static bool bbDecodeTelemetry(void)
             uint32_t rawValue = decode_bb_bitband(
                 bbMotors[motorIndex].bbPort->portInputBuffer,
                 bbMotors[motorIndex].bbPort->portInputCount,
+#ifdef PERF_BB_DECODE
+                bbMotors[motorIndex].pinIndex, nowUs);
+#else
                 bbMotors[motorIndex].pinIndex);
+#endif
 #else
             uint32_t rawValue = decode_bb(
                 bbMotors[motorIndex].bbPort->portInputBuffer,
                 bbMotors[motorIndex].bbPort->portInputCount,
+#ifdef PERF_BB_DECODE
+                bbMotors[motorIndex].pinIndex, nowUs);
+#else
                 bbMotors[motorIndex].pinIndex);
+#endif
 #endif
             if (rawValue == DSHOT_TELEMETRY_NOEDGE) {
                 DEBUG_SET(DEBUG_DSHOT_TELEMETRY_COUNTS, 1, debug[1] + 1);  //!< Missing Edge Count
@@ -626,11 +887,17 @@ static bool bbDecodeTelemetry(void)
     return true;
 }
 
-static void bbWriteInt(uint8_t motorIndex, uint16_t value)
+static BB_HOT_CODE void bbWriteInt(uint8_t motorIndex, uint16_t value)
 {
     bbMotor_t *const bbmotor = &bbMotors[motorIndex];
 
+#if DSHOT_BB_NOSPIN == 1 || DSHOT_BB_NOSPIN == 3
+    // Not configured, or the previous frame still owns the line: leave the buffer
+    // and the telemetry request alone.
+    if (!bbmotor->configured || bbFrameDeferred) {
+#else
     if (!bbmotor->configured) {
+#endif
         return;
     }
 
@@ -658,13 +925,24 @@ static void bbWriteInt(uint8_t motorIndex, uint16_t value)
     }
 }
 
-static void bbWrite(uint8_t motorIndex, float value)
+static BB_HOT_CODE void bbWrite(uint8_t motorIndex, float value)
 {
     bbWriteInt(motorIndex, lrintf(value));
 }
 
-static void bbUpdateComplete(void)
+static BB_HOT_CODE void bbUpdateComplete(void)
 {
+#if DSHOT_BB_NOSPIN
+    // The previous frame still owns the line: nothing is sent, and the dshot
+    // command sequence does not advance this update.
+    if (bbFrameDeferred) {
+#ifdef DSHOT_BB_PROBE
+        dtProbe.waitCount++;
+#endif
+        return;
+    }
+#endif
+
     // If there is a dshot command loaded up, time it correctly with motor update
 
     if (!dshotCommandQueueEmpty()) {
@@ -677,6 +955,12 @@ static void bbUpdateComplete(void)
         bbPort_t *bbPort = &bbPorts[i];
 #ifdef USE_DSHOT_CACHE_MGMT
         SCB_CleanDCache_by_Addr(bbPort->portOutputBuffer, MOTOR_DSHOT_BUF_CACHE_ALIGN_BYTES);
+#endif
+#ifdef DSHOT_BB_PROBE
+        if (bbPort->direction == DSHOT_BITBANG_DIRECTION_OUTPUT && IS_DMA_ENABLED(bbPort->dmaResource)) {
+            // The previous frame is still being clocked out.
+            dtProbe.outputBusy++;
+        }
 #endif
 
         if (bbPort->reinitRequired) {
@@ -712,10 +996,25 @@ static void bbUpdateComplete(void)
 #endif
         }
 
+#if DSHOT_BB_NOSPIN == 1 && defined(USE_DSHOT_TELEMETRY)
+        if (useDshotTelemetry) {
+            // Busy from now until bbDMAIrqHandler() sees the capture complete,
+            // so bbTelemetryBusy() covers the output phase as well.
+            bbPort->telemetryPending = true;
+        }
+#endif
         bbDMA_Cmd(bbPort, ENABLE);
     }
 
+#ifdef DSHOT_BB_PROBE
+    {
+        const timeUs_t nowUs = micros();
+        dtProbeWindow(nowUs);
+        lastSendUs = nowUs;
+    }
+#else
     lastSendUs = micros();
+#endif
     for (int i = 0; i < usedMotorPacers; i++) {
         bbPacer_t *bbPacer = &bbPacers[i];
         bbTIM_DMACmd(bbPacer->tim, bbPacer->dmaSources, ENABLE);
@@ -766,7 +1065,11 @@ static const motorVTable_t bbVTable = {
     .enable = bbEnableMotors,
     .disable = bbDisableMotors,
     .isMotorEnabled = bbIsMotorEnabled,
+#if DSHOT_BB_NOSPIN == 1
+    .telemetryWait = NULL,  // Never waits: bbUpdateInit() skips the update instead
+#else
     .telemetryWait = bbTelemetryWait,
+#endif
     .decodeTelemetry = bbDecodeTelemetry,
     .updateInit = bbUpdateInit,
     .write = bbWrite,
@@ -805,6 +1108,11 @@ bool dshotBitbangDevInit(motorDevice_t *device, const motorDevConfig_t *motorCon
 #endif
 
     memset(bbOutputBuffer, 0, sizeof(bbOutputBuffer));
+
+#ifdef DSHOT_BB_PROBE
+    dtProbe.gapMinUs = UINT32_MAX;
+    dtProbe.windowStartUs = micros();
+#endif
 
     for (int motorIndex = 0; motorIndex < MAX_SUPPORTED_MOTORS && motorIndex < dshotMotorCount; motorIndex++) {
         const unsigned reorderedMotorIndex = motorConfig->motorOutputReordering[motorIndex];

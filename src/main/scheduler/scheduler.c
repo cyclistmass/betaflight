@@ -50,6 +50,9 @@
 #include "scheduler.h"
 
 #include "sensors/gyro_init.h"
+#ifdef DSHOT_BB_PROBE
+#include "drivers/dshot.h"
+#endif
 
 // DEBUG_SCHEDULER, timings for:
 // 0 - Average time spent executing check function
@@ -295,6 +298,26 @@ void setTaskEnabled(taskId_e taskId, bool enabled)
     }
 }
 
+#ifdef PERF_HOLD_TASK_SIGNAL
+// Signal a time-driven task to run at its next scheduling opportunity, as though it had
+// just aged a period. For a task that consumes what another task produces, so that the
+// consumer runs as soon as the data exists rather than at an arbitrary phase relative to
+// it, and costs the scheduler nothing in between. The consumer keeps its desiredPeriodUs
+// as a fallback for when the producer is not running. A task with a checkFunc signals
+// itself from there instead. Harmless for a task that is not enabled.
+void schedulerSignalTask(taskId_e taskId)
+{
+    if (taskId < TASK_COUNT) {
+        task_t *task = getTask(taskId);
+        const uint16_t signalledPriority = 1 + task->attribute->staticPriority;
+        // never demote a task that has already aged past this
+        if (task->dynamicPriority < signalledPriority) {
+            task->dynamicPriority = signalledPriority;
+        }
+    }
+}
+
+#endif
 timeDelta_t getTaskDeltaTimeUs(taskId_e taskId)
 {
     if (taskId == TASK_SELF) {
@@ -512,7 +535,13 @@ FAST_CODE void scheduler(void)
 #endif
 
 #if !defined(UNIT_TEST)
+#ifdef PERF_SCHED_TASK_AGE
+    // Overhead instrumentation for DEBUG_SCHEDULER. Read the cycle counter rather than micros(): a DWT read is a
+    // single load, whereas micros() spins on SysTick and divides, and this runs on every scheduler pass.
+    const uint32_t schedulerStartCycles = getCycleCounter();
+#else
     const timeUs_t schedulerStartTimeUs = micros();
+#endif
 #endif
     timeUs_t currentTimeUs;
     uint32_t nowCycles;
@@ -541,6 +570,9 @@ FAST_CODE void scheduler(void)
         schedLoopRemainingCycles = cmpTimeCycles(nextTargetCycles, nowCycles);
 
         if (schedLoopRemainingCycles < -desiredPeriodCycles) {
+#ifdef DSHOT_BB_PROBE
+            dtProbe.schedSkips += 1 + (schedLoopRemainingCycles / -desiredPeriodCycles);
+#endif
             /* A task has so grossly overrun that at entire gyro cycle has been skipped
              * This is most likely to occur when connected to the configurator via USB as the serial
              * task is non-deterministic
@@ -743,11 +775,27 @@ FAST_CODE void scheduler(void)
                     }
                 } else {
                     // Task is time-driven, dynamicPriority is last execution age (measured in desiredPeriods)
+#ifdef PERF_SCHED_TASK_AGE
+                    // Task age is calculated from last execution. Most tasks are not yet due on most passes,
+                    // so skip the division until the age is at least one period. A negative age of a period
+                    // or more (clock restart, or more than 2^31 us since the last run) still divides, so the
+                    // priority matches the plain division in every case.
+                    const timeDelta_t taskAgeUs = cmpTimeUs(currentTimeUs, task->lastExecutedAtUs);
+                    if (taskAgeUs >= task->attribute->desiredPeriodUs || taskAgeUs <= -task->attribute->desiredPeriodUs) {
+                        task->taskAgePeriods = taskAgeUs / task->attribute->desiredPeriodUs;
+                        if (task->taskAgePeriods > 0) {
+                            task->dynamicPriority = 1 + task->attribute->staticPriority * task->taskAgePeriods;
+                        }
+                    } else {
+                        task->taskAgePeriods = 0;
+                    }
+#else
                     // Task age is calculated from last execution
                     task->taskAgePeriods = (cmpTimeUs(currentTimeUs, task->lastExecutedAtUs) / task->attribute->desiredPeriodUs);
                     if (task->taskAgePeriods > 0) {
                         task->dynamicPriority = 1 + task->attribute->staticPriority * task->taskAgePeriods;
                     }
+#endif
                 }
 
                 if (task->dynamicPriority > selectedTaskDynamicPriority) {
@@ -840,7 +888,11 @@ FAST_CODE void scheduler(void)
     readSchedulerLocals(selectedTask, selectedTaskDynamicPriority);
     UNUSED(taskExecutionTimeUs);
 #else
+#ifdef PERF_SCHED_TASK_AGE
+    DEBUG_SET(DEBUG_SCHEDULER, 2, clockCyclesToMicros(cmpTimeCycles(getCycleCounter(), schedulerStartCycles)) - taskExecutionTimeUs);  //!< Scheduler Overhead [unit:us]
+#else
     DEBUG_SET(DEBUG_SCHEDULER, 2, micros() - schedulerStartTimeUs - taskExecutionTimeUs);  //!< Scheduler Overhead [unit:us]
+#endif
 #endif
 
     scheduleCount++;
