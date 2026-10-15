@@ -1,0 +1,165 @@
+﻿
+Entering CLI Mode, type 'exit' to reboot, or 'help'
+
+# version
+# Betaflight / STM32F722 (F722) 2026.12.0-alpha Oct 14 2026 / 18:17:04 (68449a311) MSP API: 1.49
+# config rev: 19303d9
+# board: manufacturer_id: SPBE, board_name: SPEEDYBEEF7V3
+
+# get motor_pwm_protocol
+motor_pwm_protocol = DSHOT600
+Allowed values: PWM, ONESHOT125, ONESHOT42, MULTISHOT, BRUSHED, DSHOT150, DSHOT300, DSHOT600, PROSHOT1000, DISABLED, DRONECAN
+
+# get dshot_bidir
+dshot_bidir = ON
+Allowed values: OFF, ON
+Default value: OFF
+
+# get pid_process_denom
+pid_process_denom = 1
+Allowed range: 1 - 16
+
+# status
+MCU: STM32F722xx CLK=216MHz, Vref=3.20V, Core temp=54degC
+STACK: 2048b (0x20010000)
+CONFIG: CONFIGURED (4148b / 16384b)
+
+DEVICES DETECTED: SPI=1, I2C=1 (0 errors)
+GYRO: (2) BMI270 enabled locked dma shared
+ACC: BMI270
+BARO: BMP280
+OSD: MSP (53 x 20)
+SD-CARD: Manufacturer 0x22, 491520kB, 05/2165, v12.8, 'MK    FS: Ready
+
+System Uptime: 41 seconds
+CPU:21%, cycle time: 316, GYRO rate: 3168, RX rate: 0, System rate: 10
+Voltage: 0.00V (0S battery - NOT PRESENT)
+Arming disable flags: RXLOSS ANGLE CLI DSHOT_TELEM
+
+# tasks
+Task list             rate/hz  max/us  avg/us maxload avgload  total/ms   late    run reqd/us
+00 - (         SYSTEM)     10       3       0    0.0%    0.0%         0      0    414       1
+01 - (         SYSTEM)    988    2027       1  200.2%    0.1%        87      6  39480       5
+02 - (           GYRO)   3168      12       2    3.8%    0.7%       311      0 131446       0
+03 - (         FILTER)   3168      36      24   11.4%    7.6%      3217      0 131446       0
+04 - (            PID)   3168      63      35   19.9%   11.2%      4755      0 131446       0
+05 - (            ACC)    792      12       4    0.9%    0.3%       166      3  32842       6
+06 - (       ATTITUDE)     99      18       8    0.1%    0.0%        38      3   4122      11
+07 - (             RX)     20      27      15    0.1%    0.0%        40      4   2616      19
+08 - (         SERIAL)     99    1836       3   18.1%    0.0%        17      0   4112      13
+09 - (       DISPATCH)    992       6       0    0.5%    0.0%        25     21  40967       4
+10 - (BATTERY_VOLTAGE)     50       5       2    0.0%    0.0%         4      0   2070       2
+11 - (BATTERY_CURRENT)     50       5       0    0.0%    0.0%         1      0   2070       0
+12 - ( BATTERY_ALERTS)      5       5       2    0.0%    0.0%         0      0    208       3
+13 - (         BEEPER)     99      11       3    0.1%    0.0%        15      1   4112      10
+14 - (           BARO)     40      25      16    0.2%    0.1%        81      4   4960      22
+15 - (       POSITION)     99      22      14    0.2%    0.1%        65      2   4107      18
+16 - (      TELEMETRY)    495       8       0    0.3%    0.0%        20     15  20498       4
+17 - (            OSD)     12      14       3    0.0%    0.0%        17     16   5325       5
+19 - (            CMS)     20       8       2    0.0%    0.0%         1      1    828       3
+20 - (        VTXCTRL)      5       5       0    0.0%    0.0%         0      0    208       4
+21 - (        CAMCTRL)      5       4       0    0.0%    0.0%         0      1    208       2
+23 - (    ADCINTERNAL)      1       6       3    0.0%    0.0%         0      0     42       5
+25 - (  SPEED_NEGOT'N)     99       6       1    0.0%    0.0%         5      1   4107       4
+26 - (      OSD_CTEXT)     99       6       0    0.0%    0.0%         2      3   4107       0
+Check Functions (RX, ...)           8       1            0.0%        14
+Total                                                   20.1%
+
+# status
+MCU: STM32F722xx CLK=216MHz, Vref=3.18V, Core temp=54degC
+STACK: 2048b (0x20010000)
+CONFIG: CONFIGURED (4148b / 16384b)
+
+DEVICES DETECTED: SPI=1, I2C=1 (0 errors)
+GYRO: (2) BMI270 enabled locked dma shared
+ACC: BMI270
+BARO: BMP280
+OSD: MSP (53 x 20)
+SD-CARD: Manufacturer 0x22, 491520kB, 05/2165, v12.8, 'MK    FS: Ready
+
+System Uptime: 46 seconds
+CPU:21%, cycle time: 316, GYRO rate: 3169, RX rate: 0, System rate: 10
+Voltage: 0.00V (0S battery - NOT PRESENT)
+Arming disable flags: RXLOSS ANGLE CLI DSHOT_TELEM
+
+# status
+MCU: STM32F722xx CLK=216MHz, Vref=3.15V, Core temp=54degC
+STACK: 2048b (0x20010000)
+CONFIG: CONFIGURED (4148b / 16384b)
+
+DEVICES DETECTED: SPI=1, I2C=1 (0 errors)
+GYRO: (2) BMI270 enabled locked dma shared
+ACC: BMI270
+BARO: BMP280
+OSD: MSP (53 x 20)
+SD-CARD: Manufacturer 0x22, 491520kB, 05/2165, v12.8, 'MK    FS: Ready
+
+System Uptime: 49 seconds
+CPU:21%, cycle time: 316, GYRO rate: 3169, RX rate: 0, System rate: 10
+Voltage: 0.00V (0S battery - NOT PRESENT)
+Arming disable flags: RXLOSS ANGLE CLI DSHOT_TELEM
+
+# status
+MCU: STM32F722xx CLK=216MHz, Vref=3.17V, Core temp=55degC
+STACK: 2048b (0x20010000)
+CONFIG: CONFIGURED (4148b / 16384b)
+
+DEVICES DETECTED: SPI=1, I2C=1 (0 errors)
+GYRO: (2) BMI270 enabled locked dma shared
+ACC: BMI270
+BARO: BMP280
+OSD: MSP (53 x 20)
+SD-CARD: Manufacturer 0x22, 491520kB, 05/2165, v12.8, 'MK    FS: Ready
+
+System Uptime: 51 seconds
+CPU:21%, cycle time: 316, GYRO rate: 3169, RX rate: 0, System rate: 10
+Voltage: 0.00V (0S battery - NOT PRESENT)
+Arming disable flags: RXLOSS ANGLE CLI DSHOT_TELEM
+
+# status
+MCU: STM32F722xx CLK=216MHz, Vref=3.17V, Core temp=54degC
+STACK: 2048b (0x20010000)
+CONFIG: CONFIGURED (4148b / 16384b)
+
+DEVICES DETECTED: SPI=1, I2C=1 (0 errors)
+GYRO: (2) BMI270 enabled locked dma shared
+ACC: BMI270
+BARO: BMP280
+OSD: MSP (53 x 20)
+SD-CARD: Manufacturer 0x22, 491520kB, 05/2165, v12.8, 'MK    FS: Ready
+
+System Uptime: 54 seconds
+CPU:21%, cycle time: 316, GYRO rate: 3168, RX rate: 0, System rate: 10
+Voltage: 0.00V (0S battery - NOT PRESENT)
+Arming disable flags: RXLOSS ANGLE CLI DSHOT_TELEM
+
+# tasks
+Task list             rate/hz  max/us  avg/us maxload avgload  total/ms   late    run reqd/us
+00 - (         SYSTEM)     10       1       0    0.0%    0.0%         0      0    127       1
+01 - (         SYSTEM)    990       9       2    0.8%    0.2%       113      0  12584       6
+02 - (           GYRO)   3169       6       2    1.9%    0.7%       409      0  40272       0
+03 - (         FILTER)   3169      31      24    9.8%    7.7%      4199      0  40272       0
+04 - (            PID)   3169      51      35   16.1%   11.3%      6194      0  40272       0
+05 - (            ACC)    792       9       5    0.7%    0.4%       217      0  10069       7
+06 - (       ATTITUDE)     99      14       9    0.1%    0.0%        49      0   1264      12
+07 - (             RX)     20      21      15    0.0%    0.0%        51      0    762      20
+08 - (         SERIAL)     99     375       3    3.7%    0.0%        28      0   1257      13
+09 - (       DISPATCH)    987       7       0    0.6%    0.0%        33      2  12585       4
+10 - (BATTERY_VOLTAGE)     50       3       2    0.0%    0.0%         5      0    635       2
+11 - (BATTERY_CURRENT)     50       3       0    0.0%    0.0%         1      0    635       0
+12 - ( BATTERY_ALERTS)      5       3       2    0.0%    0.0%         0      0     63       3
+13 - (         BEEPER)     99       7       3    0.0%    0.0%        20      0   1257      10
+14 - (           BARO)     40      22      17    0.2%    0.1%       106      0   1521      22
+15 - (       POSITION)     99      20      15    0.1%    0.1%        84      0   1256      18
+16 - (      TELEMETRY)    496       5       0    0.2%    0.0%        23     10   6285       4
+17 - (            OSD)     12      14       3    0.0%    0.0%        22      3   1683       6
+19 - (            CMS)     20       4       1    0.0%    0.0%         2      0    254       3
+20 - (        VTXCTRL)      5       1       0    0.0%    0.0%         0      0     63       4
+21 - (        CAMCTRL)      5       1       0    0.0%    0.0%         0      0     63       2
+23 - (    ADCINTERNAL)      1       4       3    0.0%    0.0%         0      0     13       5
+25 - (  SPEED_NEGOT'N)     99       6       1    0.0%    0.0%         7      1   1256       4
+26 - (      OSD_CTEXT)     99       3       0    0.0%    0.0%         3      0   1256       0
+Check Functions (RX, ...)           8       2            0.0%        19
+Total                                                   20.5%
+
+# 
