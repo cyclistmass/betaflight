@@ -113,6 +113,8 @@ jobs:
       - run: make SDK=arm platform-tools-install
       - run: make configs
       - name: Same machine code as BASE_REF without the Fable and probe switches
+        env:
+          SOURCE_DATE_EPOCH: 0  # fixed __DATE__/__TIME__ so build time does not show as a difference
         run: |
           OBJDUMP=$(ls tools/*/bin/arm-none-eabi-objdump | head -1)
           bad=0
@@ -133,6 +135,7 @@ jobs:
               tag=$(echo "x$f" | tr -c 'A-Za-z0-9' _)
               n=$(diff "dis_${BASE_REF:0:9}_${b}_${tag}.txt" "dis_${FW_REF:0:9}_${b}_${tag}.txt" | grep -c '^[<>]' || true)
               echo "IDENTITY $b [${f:-none}]: $n differing lines"
+              diff "dis_${BASE_REF:0:9}_${b}_${tag}.txt" "dis_${FW_REF:0:9}_${b}_${tag}.txt" | head -20 || true
               [ "$n" = 0 ] || bad=1
             done
           done
