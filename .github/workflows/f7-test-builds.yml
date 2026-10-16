@@ -1,6 +1,7 @@
 # TEST ONLY: build the five F722 perf test variants for every STM32F722 and STM32F745 board config.
 # Runs on push to branch f7-test-builds. Builds the code at FW_REF, not the branch tip, so every
-# hex carries the same revision as the test release. Output: one artifact per variant, each with
+# hex carries the revision of FW_REF. The identity job checks that FW_REF and BASE_REF give the
+# same machine code for builds without the Fable and probe switches. Output: one artifact per variant, each with
 # the hex files, SHA256SUMS.txt and FAILED.txt. Nothing is uploaded to a release by this workflow.
 
 name: F7 test builds
@@ -10,7 +11,8 @@ on:
     branches: [f7-test-builds]
 
 env:
-  FW_REF: 900f67102ccb0ae755455094e49dcad1d7e36a29
+  FW_REF: 5405512efec3b47c66b8d65dcf76f51d1f78bcf8
+  BASE_REF: 900f67102ccb0ae755455094e49dcad1d7e36a29
   GATES: -DTEST_UNGATE_PID_DENOM_CHECK -DDSHOT_BB_PROBE
   SHARDS: 20
 
@@ -95,6 +97,46 @@ jobs:
           name: shard-${{ matrix.shard }}
           path: out
           retention-days: 14
+
+  identity:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ env.FW_REF }}
+          fetch-depth: 0
+      - run: git submodule update --init -- src/config
+      - uses: actions/cache@v5
+        with:
+          path: tools
+          key: f7-test-tools-${{ hashFiles('mk/tools.mk') }}
+      - run: make SDK=arm platform-tools-install
+      - run: make configs
+      - name: Same machine code as BASE_REF without the Fable and probe switches
+        run: |
+          OBJDUMP=$(ls tools/*/bin/arm-none-eabi-objdump | head -1)
+          bad=0
+          for ref in "$BASE_REF" "$FW_REF"; do
+            git checkout -q "$ref"
+            git submodule update -q -- src/config
+            for b in GEPRCF722_BT_HD_V3 SPEEDYBEEF7V3; do
+              for f in "" "-DPERF_LOOP" "-DPERF_ALL -DDSHOT_BB_NOSPIN_OPUS" "-DPERF_ALL -DDSHOT_BB_NOSPIN_SOL"; do
+                tag=$(echo "x$f" | tr -c 'A-Za-z0-9' _)
+                rm -rf obj
+                make -j"$(nproc)" CONFIG=$b REVISION=pinned0000 EXTRA_FLAGS="-Werror -DTEST_UNGATE_PID_DENOM_CHECK $f" > build.log 2>&1 || { tail -5 build.log; exit 1; }
+                $OBJDUMP -d obj/main/*.elf | tail -n +3 > "dis_${ref:0:9}_${b}_${tag}.txt"
+              done
+            done
+          done
+          for b in GEPRCF722_BT_HD_V3 SPEEDYBEEF7V3; do
+            for f in "" "-DPERF_LOOP" "-DPERF_ALL -DDSHOT_BB_NOSPIN_OPUS" "-DPERF_ALL -DDSHOT_BB_NOSPIN_SOL"; do
+              tag=$(echo "x$f" | tr -c 'A-Za-z0-9' _)
+              n=$(diff "dis_${BASE_REF:0:9}_${b}_${tag}.txt" "dis_${FW_REF:0:9}_${b}_${tag}.txt" | grep -c '^[<>]' || true)
+              echo "IDENTITY $b [${f:-none}]: $n differing lines"
+              [ "$n" = 0 ] || bad=1
+            done
+          done
+          exit $bad
 
   package:
     needs: build
