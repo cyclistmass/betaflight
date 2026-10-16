@@ -158,6 +158,32 @@ static motorProtocolTypes_e motorProtocol;
 #include "common/maths.h"
 #include "drivers/system.h"  // getCycleCounter(), clockCyclesToMicros()
 
+// EXPERIMENT (not applied): once a second, publishes the window to debug[0..7]
+// when debug_mode is NONE, then starts a new window. Out of line so that it stays
+// out of ITCM under PERF_BB_ITCM.
+static NOINLINE void dtProbePublish(timeUs_t nowUs)
+{
+    if (debugMode == DEBUG_NONE) {
+        debug[0] = MIN(dtProbe.waitMaxUs, (uint32_t)INT16_MAX);                      // max spin in bbTelemetryWait [us]
+        debug[1] = MIN(dtProbe.waitCount, (uint32_t)INT16_MAX);                      // updates that spun or were deferred
+        debug[2] = (dtProbe.gapMinUs == UINT32_MAX) ? 0 : MIN(dtProbe.gapMinUs, (uint32_t)INT16_MAX); // min send gap [us]
+        debug[3] = MIN(dtProbe.gapMaxUs, (uint32_t)INT16_MAX);                       // max send gap [us]
+        debug[4] = MIN(dtProbe.gyroLatMaxUs, (uint32_t)INT16_MAX);                   // max gyro EXTI -> TASK_GYRO [us]
+        debug[5] = MIN(dtProbe.schedSkips, (uint32_t)INT16_MAX);                     // gyro cycles skipped by the scheduler
+        debug[6] = MIN(dtProbe.outputBusy, (uint32_t)INT16_MAX);                     // updates with the output DMA still running
+        debug[7] = MIN(dtProbe.waitSumUs / 1000, (uint32_t)INT16_MAX);               // total spin [0.1% of the second]
+    }
+    dtProbe.windowStartUs = nowUs;
+    dtProbe.waitMaxUs = 0;
+    dtProbe.waitCount = 0;
+    dtProbe.waitSumUs = 0;
+    dtProbe.gapMinUs = UINT32_MAX;
+    dtProbe.gapMaxUs = 0;
+    dtProbe.gyroLatMaxUs = 0;
+    dtProbe.schedSkips = 0;
+    dtProbe.outputBusy = 0;
+}
+
 // Called from bbUpdateComplete() at every send, task context. Tracks the
 // send-to-send gap and, once a second, publishes the window to debug[0..7]
 // when debug_mode is NONE, then starts a new window.
@@ -174,25 +200,7 @@ static void dtProbeWindow(timeUs_t nowUs)
     }
 
     if (cmpTimeUs(nowUs, dtProbe.windowStartUs) >= 1000000) {
-        if (debugMode == DEBUG_NONE) {
-            debug[0] = MIN(dtProbe.waitMaxUs, (uint32_t)INT16_MAX);                      // max spin in bbTelemetryWait [us]
-            debug[1] = MIN(dtProbe.waitCount, (uint32_t)INT16_MAX);                      // updates that spun or were deferred
-            debug[2] = (dtProbe.gapMinUs == UINT32_MAX) ? 0 : MIN(dtProbe.gapMinUs, (uint32_t)INT16_MAX); // min send gap [us]
-            debug[3] = MIN(dtProbe.gapMaxUs, (uint32_t)INT16_MAX);                       // max send gap [us]
-            debug[4] = MIN(dtProbe.gyroLatMaxUs, (uint32_t)INT16_MAX);                   // max gyro EXTI -> TASK_GYRO [us]
-            debug[5] = MIN(dtProbe.schedSkips, (uint32_t)INT16_MAX);                     // gyro cycles skipped by the scheduler
-            debug[6] = MIN(dtProbe.outputBusy, (uint32_t)INT16_MAX);                     // updates with the output DMA still running
-            debug[7] = MIN(dtProbe.waitSumUs / 1000, (uint32_t)INT16_MAX);               // total spin [0.1% of the second]
-        }
-        dtProbe.windowStartUs = nowUs;
-        dtProbe.waitMaxUs = 0;
-        dtProbe.waitCount = 0;
-        dtProbe.waitSumUs = 0;
-        dtProbe.gapMinUs = UINT32_MAX;
-        dtProbe.gapMaxUs = 0;
-        dtProbe.gyroLatMaxUs = 0;
-        dtProbe.schedSkips = 0;
-        dtProbe.outputBusy = 0;
+        dtProbePublish(nowUs);
     }
 }
 #endif
@@ -730,7 +738,7 @@ static bool bbTelemetryWait(void)
 // Fable. True while the previous frame still owns the line on any port group: its
 // telemetry capture is pending, or its output DMA is still running (two
 // updates less than a frame apart).
-static BB_HOT_CODE bool bbLineBusy(void)
+static bool bbLineBusy(void)
 {
     for (int i = 0; i < usedMotorPorts; i++) {
         const bbPort_t *bbPort = &bbPorts[i];
@@ -739,6 +747,44 @@ static BB_HOT_CODE bool bbLineBusy(void)
             return true;
         }
     }
+
+    return false;
+}
+
+// Fable. Decides for bbUpdateInit() whether this update is deferred because the
+// previous frame still owns the line. Kept out of line, and so out of ITCM under
+// PERF_BB_ITCM: on F722 the bitbang hot path shares 16 KB with the PID loop, and
+// the line check runs from flash in the other lanes too (bbTelemetryBusy(),
+// bbTelemetryWait()). Returns true if this update is to be deferred.
+static NOINLINE bool bbDeferFrame(void)
+{
+    if (!bbLineBusy()) {
+        return false;
+    }
+
+    // The capture must not be cut short (#15533). Waiting for it instead, as
+    // bbTelemetryWait() used to, spins in the PID task for the rest of the window,
+    // up to the whole ~62 us at DShot600: half an 8 kHz loop, spent making a loop
+    // that is already late later still. So the frame is deferred: the buffers and
+    // the stream are left alone this update and the next PID loop sends fresh
+    // values. The ESC misses one update, 125 us at 8 kHz, far below any DShot
+    // signal timeout. An output DMA still running is deferred for the same
+    // reason: the new values would otherwise be written into the buffer it reads.
+    if (cmpTimeUs(micros(), lastSendUs) <= (timeDelta_t)dshotFrameUs + bbTelemetryTimeoutUs) {
+        DEBUG_SET(DEBUG_DSHOT_TELEMETRY_COUNTS, 4, debug[4] + 1);  //!< Deferred Frame Count
+        return true;
+    }
+
+    // A port still busy after the frame plus capture backstop has a stalled
+    // stream. Leave it for bbUpdateComplete() to reinitialise, as it does on
+    // every cycle. The buffers may hold a partial frame, so skip them rather
+    // than decode a bad-but-valid GCR frame.
+    for (int i = 0; i < usedMotorPorts; i++) {
+        if (bbPorts[i].telemetryPending) {
+            bbPorts[i].telemetryAborted = true;
+        }
+    }
+    DEBUG_SET(DEBUG_DSHOT_TELEMETRY_COUNTS, 2, debug[2] + 1);  //!< Reception Timeout Count
 
     return false;
 }
@@ -765,33 +811,10 @@ static BB_HOT_CODE void bbUpdateInit(void)
 #elif DSHOT_BB_NOSPIN == 2
     bbFrameDeferred = false;
 #elif DSHOT_BB_NOSPIN == 3
-    bbFrameDeferred = false;
-
-    if (bbLineBusy()) {
-        // The capture must not be cut short (#15533). Waiting for it instead, as
-        // bbTelemetryWait() used to, spins in the PID task for the rest of the window,
-        // up to the whole ~62 us at DShot600: half an 8 kHz loop, spent making a loop
-        // that is already late later still. So the frame is deferred: the buffers and
-        // the stream are left alone this update and the next PID loop sends fresh
-        // values. The ESC misses one update, 125 us at 8 kHz, far below any DShot
-        // signal timeout. An output DMA still running is deferred for the same
-        // reason: the new values would otherwise be written into the buffer it reads.
-        if (cmpTimeUs(micros(), lastSendUs) <= (timeDelta_t)dshotFrameUs + bbTelemetryTimeoutUs) {
-            bbFrameDeferred = true;
-            DEBUG_SET(DEBUG_DSHOT_TELEMETRY_COUNTS, 4, debug[4] + 1);  //!< Deferred Frame Count
-            return;
-        }
-
-        // A port still busy after the frame plus capture backstop has a stalled
-        // stream. Leave it for bbUpdateComplete() to reinitialise, as it does on
-        // every cycle. The buffers may hold a partial frame, so skip them rather
-        // than decode a bad-but-valid GCR frame.
-        for (int i = 0; i < usedMotorPorts; i++) {
-            if (bbPorts[i].telemetryPending) {
-                bbPorts[i].telemetryAborted = true;
-            }
-        }
-        DEBUG_SET(DEBUG_DSHOT_TELEMETRY_COUNTS, 2, debug[2] + 1);  //!< Reception Timeout Count
+    // Decided out of line, see bbDeferFrame().
+    bbFrameDeferred = bbDeferFrame();
+    if (bbFrameDeferred) {
+        return;
     }
 #endif
     for (int i = 0; i < usedMotorPorts; i++) {
